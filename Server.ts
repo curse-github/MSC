@@ -84,7 +84,9 @@ const EmptyTransformationObj:transformationObj = {translation:[0,0,0],left_rotat
 
 class Minecraft {
     cmdQueue:string[];
-    cmdResolves:((value:any)=>void)[];
+    cmdResolves:(((value:any)=>void)|"none")[];
+    cmdStatuses:("none"|"waiting")[];
+
     waiting:boolean;
     server:ChildProcessWithoutNullStreams;
     playerData:{[key:string]:PlayerData} = {};
@@ -96,6 +98,7 @@ class Minecraft {
 
         this.cmdQueue=[];
         this.cmdResolves=[];
+        this.cmdStatuses=[];
         this.waiting=false;
 
         this.server = spawn("java",["-Xmx5G", "-Xms5G", "-jar", "./server.jar", "nogui"],{cwd:__dirname+"/server"});
@@ -117,17 +120,34 @@ class Minecraft {
         return new Promise<string>((resolve:(value:any)=>void)=>{
             this.cmdQueue   .push(stdin  );
             this.cmdResolves.push(resolve);
+            this.cmdStatuses.push("none" );
             this.runNextCmd();
         });
         //server.stdin.end();
     }
     cmdNoOutput(stdin:string) {
-        this.server.stdin.write(stdin+"\n");
+        this.cmdQueue   .push(stdin );
+        this.cmdResolves.push("none");
+        this.cmdStatuses.push("none");
+        this.runNextCmd();
     }
     runNextCmd() {
-        if (!this.waiting && this.cmdQueue.length>0) {
-            this.server.stdin.write(this.cmdQueue[0]+"\n");
+        if (this.cmdResolves[0]=="none") {
+            for (let i = 0; i < this.cmdQueue.length; i++) {
+                if (this.cmdResolves[i]=="none") {
+                    if (this.cmdStatuses[i]!="waiting") {
+                        this.server.stdin.write(this.cmdQueue[i]+"\n");
+                        this.cmdStatuses[i]="waiting";
+                    }
+                } else break;
+            }
             this.waiting=true;
+        } else if (!this.waiting) {
+            if (this.cmdQueue.length>0) {
+                this.server.stdin.write(this.cmdQueue[0]+"\n");
+                this.cmdStatuses[0]="waiting";
+                this.waiting=true;
+            }
         }
     }
     getPlayerPos(name:string) {
@@ -427,9 +447,10 @@ class Minecraft {
         if (this.waiting && this.cmdResolves.length>0) {
             if (out!="Unknown or incomplete command, see below for error") {
                 this.cmdQueue.shift();
-                var resolve:((value:any)=>void) = this.cmdResolves.shift()!;
-                this.waiting=false;
-                if (resolve!=null) resolve(out);
+                this.cmdStatuses.shift();
+                var resolve:((value:any)=>void)|"none" = this.cmdResolves.shift()!;
+                if (resolve!="none"){ resolve(out); }
+                if (this.cmdStatuses[0]!="waiting") this.waiting=false;
                 this.runNextCmd();
             }
         }
@@ -540,6 +561,17 @@ class BlockDisplay extends Entity{
             this.parent.cmd(this.command).then((out:string)=>{if (out.includes("Modified entity data of")) resolve(true); else resolve(false);});
         });
     }
+    animateNoDelay(ticks:number):Promise<boolean> {
+        return new Promise<boolean>((resolve:(value:boolean)=>void)=>{
+            this.command = "data merge entity @e[nbt={Tags:[\""+this.uuid+"\",\"FromServer\",\"Displays\"]},limit=1]";
+            var nbt:string = "{";
+            nbt+="start_interpolation:0,interpolation_duration:"+ticks;
+            if (this.transformation!=null) nbt+=",transformation:"+Minecraft.transformationToString(this.transformation);
+            nbt+="}";
+            this.command+=" "+nbt;
+            this.parent.cmdNoOutput(this.command);
+        });
+    }
 }
 
 const mine:Minecraft = new Minecraft();
@@ -555,11 +587,56 @@ mine.Emitter.on("playerLeft",(e:{name:string,preventDefault:()=>void})=>{
     mine.cmd("deop "+e.name).then((out:string)=>{console.log(Colors.Fgra+out+Colors.R);})
 });
 */
+var door:[BlockDisplay,BlockDisplay,BlockDisplay,BlockDisplay]|undefined;
 mine.Emitter.on("playerChat",async(e:{name:string,chat:string,player:PlayerData,preventDefault:()=>void})=>{
     if (e.chat=="stop") {
         e.preventDefault();
         console.log(Colors.Fgra+(await mine.cmd("stop"))+Colors.R);
         return;
+    } else if (e.chat=="summonDoor") { e.preventDefault();
+        var playerPos:Vec3<number> = (await mine.playerData[e.name].updatePos()) as Vec3<number>;
+        door = [
+            mine.summonBlockDisplay( playerPos                                  ,"minecraft:spruce_door",{facing:"north",half:"lower",hinge:"left" ,open:"false"},{translation:[0,0,0],left_rotation:[0,0,0,1],scale:[1,1,1],right_rotation:[0,0,0,1]},[],false),
+            mine.summonBlockDisplay([playerPos[0]  ,playerPos[1]+1,playerPos[2]],"minecraft:spruce_door",{facing:"north",half:"upper",hinge:"left" ,open:"false"},{translation:[0,0,0],left_rotation:[0,0,0,1],scale:[1,1,1],right_rotation:[0,0,0,1]},[],false),
+            mine.summonBlockDisplay([playerPos[0]+1,playerPos[1]  ,playerPos[2]],"minecraft:spruce_door",{facing:"north",half:"lower",hinge:"right",open:"false"},{translation:[0,0,0],left_rotation:[0,0,0,1],scale:[1,1,1],right_rotation:[0,0,0,1]},[],false),
+            mine.summonBlockDisplay([playerPos[0]+1,playerPos[1]+1,playerPos[2]],"minecraft:spruce_door",{facing:"north",half:"upper",hinge:"right",open:"false"},{translation:[0,0,0],left_rotation:[0,0,0,1],scale:[1,1,1],right_rotation:[0,0,0,1]},[],false)
+        ];
+        door[0].addTags("Door");
+        door[0].build();
+        door[1].addTags("Door");
+        door[1].build();
+        door[2].addTags("Door");
+        door[2].build();
+        door[3].addTags("Door");
+        door[3].build();
+    } else if (e.chat=="rotateDoor" && door != null) { e.preventDefault();
+        (door[0].transformation as transformationObj).left_rotation = [0,0.703,0,0.711];
+        (door[0].transformation as transformationObj).translation = [-13/16,0,1];
+        (door[1].transformation as transformationObj).left_rotation = [0,0.703,0,0.711];
+        (door[1].transformation as transformationObj).translation = [-13/16,0,1];
+        door[0].animateNoDelay(10);
+        door[1].animateNoDelay(10);
+
+        (door[2].transformation as transformationObj).left_rotation = [0,1,0,0];
+        (door[2].transformation as transformationObj).translation = [29/16,0,1];
+        (door[3].transformation as transformationObj).left_rotation = [0,1,0,0];
+        (door[3].transformation as transformationObj).translation = [29/16,0,1];
+        door[2].animateNoDelay(10);
+        door[3].animateNoDelay(10);
+    } else if (e.chat=="un-rotateDoor" && door != null) { e.preventDefault();
+        (door[0].transformation as transformationObj).left_rotation = [0,0,0,1];
+        (door[0].transformation as transformationObj).translation = [0,0,0];
+        (door[1].transformation as transformationObj).left_rotation = [0,0,0,1];
+        (door[1].transformation as transformationObj).translation = [0,0,0];
+        door[0].animateNoDelay(10);
+        door[1].animateNoDelay(10);
+
+        (door[2].transformation as transformationObj).left_rotation = [0,0,0,1];
+        (door[2].transformation as transformationObj).translation = [0,0,0];
+        (door[3].transformation as transformationObj).left_rotation = [0,0,0,1];
+        (door[3].transformation as transformationObj).translation = [0,0,0];
+        door[2].animateNoDelay(10);
+        door[3].animateNoDelay(10);
     }
 });
 mine.Emitter.on("playerCmdOut",async (e:{name:string,out:string,player:PlayerData,preventDefault:()=>void})=>{
@@ -591,7 +668,7 @@ mine.Emitter.on("playerChat",async(e:{name:string,chat:string,player:PlayerData,
         var finalPos:Vec3<number> = (await mine.playerData[e.name].updatePos()) as Vec3<number>;
 
         if (displays.length!=0&&displayIndex!=-1) { var display = displays[displayIndex];display.glowing=false;display.update(); }
-        displays.push(mine.summonBlockDisplay(finalPos,"minecraft:diamond_block",null,{translation:[0,0,0],left_rotation:[0,0,0,1],scale:[1,1,1],right_rotation:[0,0,0,1]},[],true,16383998));
+        displays.push(mine.summonBlockDisplay(finalPos,"minecraft:diamond_block",null,{translation:[0,0,0],left_rotation:[0,0,0,1],scale:[1,1,1],right_rotation:[0,0,0,1]},[],true));
         var display = displays[displays.length-1];
         display.build();
         displayIndex=displays.length-1;
@@ -601,7 +678,7 @@ mine.Emitter.on("playerChat",async(e:{name:string,chat:string,player:PlayerData,
         var finalPos:Vec3<number> = await relativePos(pos,playerPos);
 
         if (displays.length!=0) { var display = displays[displayIndex];display.glowing=false;display.update(); }
-        displays.push(mine.summonBlockDisplay(finalPos,"minecraft:diamond_block",null,{translation:[0,0,0],left_rotation:[0,0,0,1],scale:[1,1,1],right_rotation:[0,0,0,1]},[],true,16383998));
+        displays.push(mine.summonBlockDisplay(finalPos,"minecraft:diamond_block",null,{translation:[0,0,0],left_rotation:[0,0,0,1],scale:[1,1,1],right_rotation:[0,0,0,1]},[],true));
         var display = displays[displays.length-1];
         display.build();
         displayIndex=displays.length-1;
