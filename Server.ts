@@ -64,6 +64,7 @@ function generateUUID():string {
 }
 type Vec3<T> = [T,T,T];
 type Vec4<T> = [T,T,T,T];
+type Vec8<T> = [T,T,T,T,T,T,T,T];
 type PlayerData = {
     name:string,
     uuid:string,
@@ -77,7 +78,8 @@ type PlayerData = {
 };
 // https://misode.github.io/transformation
 type transformationObj = {translation:Vec3<number>,scale:Vec3<number>,left_rotation:Vec4<number>,right_rotation:Vec4<number>};
-type Transformation = transformationObj|[number,number,number,number,number,number,number,number,number,number,number,number,number,number,number,number];
+type Transformation = transformationObj|Vec8<number>;
+const EmptyTransformationObj:transformationObj = {translation:[0,0,0],left_rotation:[0,0,0,1],scale:[1,1,1],right_rotation:[0,0,0,1]}
 
 
 class Minecraft {
@@ -442,63 +444,90 @@ class Minecraft {
             return str;
         }
     }
-    summonBlockDisplay(pos:Vec3<number>,Name:string,Properties:{[key:string]:string}|null,transformation:Transformation|null,Tags:string[]|null,glowing:boolean,glow_color_override:number|null):BlockDisplay {
+    summonBlockDisplay(pos:Vec3<number>,Name:string,Properties:{[key:string]:string}|null,transformation:Transformation,Tags:string[]|null,glowing:boolean,glow_color_override?:number|null):BlockDisplay {
         return new BlockDisplay(this,pos,Name,Tags,Properties,transformation,glowing,glow_color_override);
     }
 }
-
-class BlockDisplay {
+abstract class Entity {
     parent:Minecraft;
-    pos:Vec3<number>;
-    blockState:{Name:string,Properties?:{[key:string]:string}|null};
-    transformation?:Transformation|null;
+
     uuid:string;
-    Tags:string[]|null;
-    glowing:boolean;
-    glow_color_override:number|null;// https://www.digminecraft.com/lists/dyed_armor_color_list_pc.php
+    nbt:{[key:string]:string|string[];}={};
+    addTags(...tags:string[]){(this.nbt.Tags as string[]).push(...(tags.map((el:string)=>"\""+el+"\"")));}
 
-    command:string|undefined;
-    constructor(parent:Minecraft, pos:Vec3<number>, Name:string, Tags:string[]|null, Properties:{[key:string]:string}|null, transformation:Transformation|null,glowing:boolean,glow_color_override:number|null) {
+    private position:Vec3<number> = [0,0,0];
+    set Pos(value:Vec3<number>){ this.position=value;this.nbt.Pos=value.map((el:number)=>el.toString()+"d"); };
+    get Pos():Vec3<number>{ return this.position; };
+
+    constructor(parent:Minecraft, Pos:Vec3<number>) {
         this.parent=parent;
-        this.pos = pos;
-        this.blockState={"Name":Name,"Properties":Properties};
-        this.transformation=transformation;
-        this.Tags=Tags||[];
-        this.glowing=glowing;
-        this.glow_color_override=glow_color_override;
 
-        this.uuid = generateUUID();
-        this.Tags.push(this.uuid,"FromServer","Displays");
+        this.nbt={ Tags:[] };
+        this.uuid=generateUUID();
+        this.addTags(this.uuid,"FromServer");
+        this.Pos = Pos;
     }
     async build():Promise<boolean> {
         return new Promise<boolean>((resolve:(value:boolean)=>void)=>{
-            this.command = "summon minecraft:block_display 0 0 0 {Tags:["+(this.Tags||[]).map((el:string)=>"\""+el+"\"").join(",")+"]}";
-            this.parent.cmd(this.command).then((out:string)=>{if (out.includes("Summoned new ")) resolve(true); else resolve(false);});
+            var command:string = "summon minecraft:block_display 0 0 0 {Tags:["+(this.nbt.Tags as string[]).join(",")+"]}";
+            this.parent.cmd(command).then((out:string)=>{if (out.includes("Summoned new ")) resolve(true); else resolve(false);});
             this.update();
-        });
-    }
-    kill():Promise<boolean> {
-        return new Promise<boolean>((resolve:(value:boolean)=>void)=>{
-            this.parent.cmd("kill @e[nbt={Tags:[\""+this.uuid+"\"]}]").then((out:string)=>{if (out.match(/Killed \d+/g) != null) resolve(true); else resolve(false);});
         });
     }
     update():Promise<boolean> {
         return new Promise<boolean>((resolve:(value:boolean)=>void)=>{
-            this.command = "data merge entity @e[nbt={Tags:[\""+this.uuid+"\",\"FromServer\",\"Displays\"]},limit=1]";
-            var blockStateStr:string = "{Name:\""+this.blockState.Name+"\"";
-            if (this.blockState.Properties!=null){ blockStateStr+=",Properties:{"+Object.entries(this.blockState.Properties).map(([key,value]:[string,string])=>{return key+":\""+value+"\"";}).join(",")+"}";}
-            blockStateStr+="}";
-            var nbt:string = "{block_state:"+blockStateStr;
-            if (this.transformation!=null) nbt+=",transformation:"+Minecraft.transformationToString(this.transformation);
-            nbt+=",Tags:["+(this.Tags||[]).map((el:string)=>"\""+el+"\"").join(",")+"]";
-            nbt+=",CustomName:\"\\\""+this.uuid+"\\\"\",CustomNameVisible:0";
-            nbt+=",Glowing:"+(this.glowing?"1b":"0b");
-            nbt+=",glow_color_override:"+(this.glow_color_override||0).toString();
-            nbt+=",Pos:["+this.pos[0]+"d,"+this.pos[1]+"d,"+this.pos[2]+"d]";
-            nbt+="}";
-            this.command+=" "+nbt;
-            this.parent.cmd(this.command).then((out:string)=>{if (out.includes("Modified entity data of")) resolve(true); else resolve(false);});
+            var command:string = "data merge entity @e[nbt={Tags:[\""+this.uuid+"\",\"FromServer\"]},limit=1]";
+            var nbt:string = "{"+Object.entries(this.nbt).map(([key,value]:[string,string|string[]])=>{
+                if ((typeof value) == "object") return key+":["+(value as string[]).join(",")+"]";
+                else return key+":"+value;
+            }).join(",")+"}";
+            command+=" "+nbt;
+            this.parent.cmd(command).then((out:string)=>{if (out.includes("Modified entity data of")) resolve(true); else resolve(false);});
         });
+    }
+    kill():Promise<boolean> {
+        return new Promise<boolean>((resolve:(value:boolean)=>void)=>{
+            this.parent.cmd("kill @e[nbt={Tags:[\""+this.uuid+"\",\"FromServer\"]}]").then((out:string)=>{if (out.match(/Killed \d+/g) != null) resolve(true); else resolve(false);});
+        });
+    }
+}
+class BlockDisplay extends Entity{
+    private blockState:{Name:string,Properties?:{[key:string]:string}};
+    setBlockState(){
+        var blockStateStr:string = "{Name:\""+this.blockState.Name+"\"";
+        if (this.blockState.Properties!=null){ blockStateStr+=",Properties:{"+Object.entries(this.blockState.Properties).map(([key,value]:[string,string])=>{return key+":\""+value+"\"";}).join(",")+"}";}
+        blockStateStr+="}";
+        this.nbt.block_state=blockStateStr;
+    }
+    set blockStateName(value:string){ this.blockState.Name=value;this.setBlockState(); };
+    get blockStateName():string{ return this.blockState.Name; };
+    set blockStateProperties(value:{[key:string]:string}|undefined){ this.blockState.Properties=value;this.setBlockState(); };
+    get blockStateProperties():{[key:string]:string}|undefined{ return this.blockState.Properties; };
+
+    private actualTransformation:Transformation=EmptyTransformationObj;
+    set transformation(value:Transformation){ this.actualTransformation=value;this.nbt.transformation=Minecraft.transformationToString(value); };
+    get transformation():Transformation{ return this.actualTransformation; };
+
+    set glowing(value:boolean){ this.nbt.Glowing=value.toString(); };
+    get glowing():boolean{ return this.nbt.Glowing=="true"; };
+
+    private glowColorOverride:number = 16383998;// https://www.digminecraft.com/lists/dyed_armor_color_list_pc.php
+    set glow_color_override(value:number){ this.glowColorOverride=value;this.nbt.glow_color_override=value.toString(); };
+    get glow_color_override():number{ return this.glowColorOverride; };
+
+    command:string|undefined;
+    constructor(parent:Minecraft, Pos:Vec3<number>, Name:string, Tags:string[]|null, Properties:{[key:string]:string}|null, transformation:Transformation|null,glowing:boolean,glow_color_override?:number|null) {
+        super(parent,Pos);
+        this.addTags("Displays","BlockDisplays");
+        this.nbt.CustomName="\"\\\""+this.uuid+"\\\"\"";
+        this.nbt.CustomNameVisible="0";
+
+        this.blockState={Name:""};
+        this.blockStateName=Name;
+        if (Properties) this.blockStateProperties=Properties;
+        if (transformation) this.transformation=transformation;
+        this.glowing=glowing;
+        if (glow_color_override) this.glow_color_override=glow_color_override;
     }
     animate(ticks:number):Promise<boolean> {
         return new Promise<boolean>((resolve:(value:boolean)=>void)=>{
@@ -518,13 +547,14 @@ const mine:Minecraft = new Minecraft();
 mine.Emitter.on("serverStart",(e:{preventDefault:()=>void})=>{
     //server started
 });
-
+/*
 mine.Emitter.on("playerJoined",(e:{name:string,preventDefault:()=>void})=>{
     mine.cmd("op "+e.name).then((out:string)=>{console.log(Colors.Fgra+out+Colors.R);})
 });
 mine.Emitter.on("playerLeft",(e:{name:string,preventDefault:()=>void})=>{
     mine.cmd("deop "+e.name).then((out:string)=>{console.log(Colors.Fgra+out+Colors.R);})
 });
+*/
 mine.Emitter.on("playerChat",async(e:{name:string,chat:string,player:PlayerData,preventDefault:()=>void})=>{
     if (e.chat=="stop") {
         e.preventDefault();
@@ -610,14 +640,14 @@ mine.Emitter.on("playerChat",async(e:{name:string,chat:string,player:PlayerData,
             display = displays[displayIndex];display.glowing=true;display.update();
         }else if (e.chat.match(/^move (((-|\+)?\d+(\.\d+)?)|~|(~((-|\+)?\d+(\.\d+)?))) (((-|\+)?\d+(\.\d+)?)|~|(~((-|\+)?\d+(\.\d+)?))) (((-|\+)?\d+(\.\d+)?)|~|(~((-|\+)?\d+(\.\d+)?)))$/g)) {
             const pos:Vec3<string> = e.chat.replace("move ","").split(" ") as Vec3<string>;
-            display.pos = await relativePos(pos,display.pos);
+            display.Pos = await relativePos(pos,display.Pos);
             display.update().then((out:boolean)=>{});return;
         } else if (e.chat.match(/^tp (((-|\+)?\d+(\.\d+)?)|~|(~((-|\+)?\d+(\.\d+)?))) (((-|\+)?\d+(\.\d+)?)|~|(~((-|\+)?\d+(\.\d+)?))) (((-|\+)?\d+(\.\d+)?)|~|(~((-|\+)?\d+(\.\d+)?)))$/g)) {
             const pos:Vec3<string> = e.chat.replace("tp ","").split(" ") as Vec3<string>;
             var playerPos:Vec3<number> = (await mine.playerData[e.name].updatePos()) as Vec3<number>;
             var finalPos:Vec3<number> = await relativePos(pos,playerPos);
     
-            display.pos=finalPos;
+            display.Pos=finalPos;
             display.update().then((out:boolean)=>{});return;
         }
     }
