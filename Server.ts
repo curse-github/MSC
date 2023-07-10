@@ -63,7 +63,7 @@ function generateUUID():string {
 	});
 }
 type Vec3<T> = [T,T,T];
-type Vec4<T> = [T,T,T,T];
+type Quat = [number,number,number,number]
 type Vec8<T> = [T,T,T,T,T,T,T,T];
 type PlayerData = {
     name:string,
@@ -77,7 +77,7 @@ type PlayerData = {
     updatePos:()=>Promise<Vec3<number>>
 };
 // https://misode.github.io/transformation
-type transformationObj = {translation:Vec3<number>,scale:Vec3<number>,left_rotation:Vec4<number>,right_rotation:Vec4<number>};
+type transformationObj = {translation:Vec3<number>,scale:Vec3<number>,left_rotation:Quat,right_rotation:Quat};
 type Transformation = transformationObj|Vec8<number>;
 const EmptyTransformationObj:transformationObj = {translation:[0,0,0],left_rotation:[0,0,0,1],scale:[1,1,1],right_rotation:[0,0,0,1]}
 
@@ -85,9 +85,7 @@ const EmptyTransformationObj:transformationObj = {translation:[0,0,0],left_rotat
 class Minecraft {
     cmdQueue:string[];
     cmdResolves:(((value:any)=>void)|"none")[];
-    cmdStatuses:("none"|"waiting")[];
 
-    waiting:boolean;
     server:ChildProcessWithoutNullStreams;
     playerData:{[key:string]:PlayerData} = {};
     tmpPlayerData:{[key:string]:any} = {};
@@ -98,8 +96,6 @@ class Minecraft {
 
         this.cmdQueue=[];
         this.cmdResolves=[];
-        this.cmdStatuses=[];
-        this.waiting=false;
 
         this.server = spawn("java",["-Xmx5G", "-Xms5G", "-jar", "./server.jar", "nogui"],{cwd:__dirname+"/server"});
         this.server.stdout.on('data', (stdout: any) => {
@@ -120,35 +116,14 @@ class Minecraft {
         return new Promise<string>((resolve:(value:any)=>void)=>{
             this.cmdQueue   .push(stdin  );
             this.cmdResolves.push(resolve);
-            this.cmdStatuses.push("none" );
-            this.runNextCmd();
+            this.server.stdin.write(stdin+"\n");
         });
         //server.stdin.end();
     }
-    cmdNoOutput(stdin:string) {
+    cmdDiscardOutput(stdin:string):void {
         this.cmdQueue   .push(stdin );
         this.cmdResolves.push("none");
-        this.cmdStatuses.push("none");
-        this.runNextCmd();
-    }
-    runNextCmd() {
-        if (this.cmdResolves[0]=="none") {
-            for (let i = 0; i < this.cmdQueue.length; i++) {
-                if (this.cmdResolves[i]=="none") {
-                    if (this.cmdStatuses[i]!="waiting") {
-                        this.server.stdin.write(this.cmdQueue[i]+"\n");
-                        this.cmdStatuses[i]="waiting";
-                    }
-                } else break;
-            }
-            this.waiting=true;
-        } else if (!this.waiting) {
-            if (this.cmdQueue.length>0) {
-                this.server.stdin.write(this.cmdQueue[0]+"\n");
-                this.cmdStatuses[0]="waiting";
-                this.waiting=true;
-            }
-        }
+        this.server.stdin.write(stdin+"\n");
     }
     getPlayerPos(name:string) {
         return new Promise<Vec3<number>>(async(resolve:(value:Vec3<number>)=>void)=>{
@@ -444,14 +419,11 @@ class Minecraft {
     }
 
     serverCmdOut(out:string) {
-        if (this.waiting && this.cmdResolves.length>0) {
+        if (this.cmdResolves.length>0) {
             if (out!="Unknown or incomplete command, see below for error") {
                 this.cmdQueue.shift();
-                this.cmdStatuses.shift();
                 var resolve:((value:any)=>void)|"none" = this.cmdResolves.shift()!;
                 if (resolve!="none"){ resolve(out); }
-                if (this.cmdStatuses[0]!="waiting") this.waiting=false;
-                this.runNextCmd();
             }
         }
         //console.log(Colors.Fgra+"[Server]: "+out+Colors.R);
@@ -461,12 +433,12 @@ class Minecraft {
         if (Array.isArray(transformation)) {
             return "["+transformation.map((el:number)=>el.toString()+"f").join(",")+"]";
         } else {
-            var str:string = "{"+Object.entries(transformation).map(([key,value]:[string,Vec3<number>|Vec4<number>])=>key+":["+value.map((el:number)=>""+el+"f").join(",")+"]").join(",")+"}";
+            var str:string = "{"+Object.entries(transformation).map(([key,value]:[string,Vec3<number>|Quat])=>key+":["+value.map((el:number)=>""+el+"f").join(",")+"]").join(",")+"}";
             return str;
         }
     }
-    summonBlockDisplay(pos:Vec3<number>,Name:string,Properties:{[key:string]:string}|null,transformation:Transformation,Tags:string[]|null,glowing:boolean,glow_color_override?:number|null):BlockDisplay {
-        return new BlockDisplay(this,pos,Name,Tags,Properties,transformation,glowing,glow_color_override);
+    summonBlockDisplay(Pos:Vec3<number>, Tags:string[]|null, Name:string, Properties:{[key:string]:string}|null, transformation:Transformation|null,glowing?:boolean|null,glow_color_override?:number|null):BlockDisplay {
+        return new BlockDisplay(this,Pos,Tags,Name,Properties,transformation,glowing,glow_color_override);
     }
 }
 abstract class Entity {
@@ -474,16 +446,16 @@ abstract class Entity {
 
     uuid:string;
     nbt:{[key:string]:string|string[];}={};
-    addTags(...tags:string[]){(this.nbt.Tags as string[]).push(...(tags.map((el:string)=>"\""+el+"\"")));}
+    addTags(...tags:string[]):Entity{(this.nbt.Tags as string[]).push(...(tags.map((el:string)=>"\""+el+"\"")));return this;}
 
     private position:Vec3<number> = [0,0,0];
     set Pos(value:Vec3<number>){ this.position=value;this.nbt.Pos=value.map((el:number)=>el.toString()+"d"); };
     get Pos():Vec3<number>{ return this.position; };
 
-    constructor(parent:Minecraft, Pos:Vec3<number>) {
+    constructor(parent:Minecraft, Pos:Vec3<number>, Tags:string[]|null) {
         this.parent=parent;
 
-        this.nbt={ Tags:[] };
+        this.nbt={ Tags:(Tags||[]).map((el:string)=>"\""+el+"\"") };
         this.uuid=generateUUID();
         this.addTags(this.uuid,"FromServer");
         this.Pos = Pos;
@@ -513,6 +485,8 @@ abstract class Entity {
     }
 }
 class BlockDisplay extends Entity{
+    addTags(...tags:string[]):BlockDisplay{super.addTags(...tags);return this;}
+
     private blockState:{Name:string,Properties?:{[key:string]:string}};
     setBlockState(){
         var blockStateStr:string = "{Name:\""+this.blockState.Name+"\"";
@@ -537,8 +511,8 @@ class BlockDisplay extends Entity{
     get glow_color_override():number{ return this.glowColorOverride; };
 
     command:string|undefined;
-    constructor(parent:Minecraft, Pos:Vec3<number>, Name:string, Tags:string[]|null, Properties:{[key:string]:string}|null, transformation:Transformation|null,glowing:boolean,glow_color_override?:number|null) {
-        super(parent,Pos);
+    constructor(parent:Minecraft, Pos:Vec3<number>, Tags:string[]|null, Name:string, Properties:{[key:string]:string}|null, transformation:Transformation|null,glowing?:boolean|null,glow_color_override?:number|null) {
+        super(parent,Pos,Tags);
         this.addTags("Displays","BlockDisplays");
         this.nbt.CustomName="\"\\\""+this.uuid+"\\\"\"";
         this.nbt.CustomNameVisible="0";
@@ -547,7 +521,7 @@ class BlockDisplay extends Entity{
         this.blockStateName=Name;
         if (Properties) this.blockStateProperties=Properties;
         if (transformation) this.transformation=transformation;
-        this.glowing=glowing;
+        if (glowing) this.glowing=glowing;
         if (glow_color_override) this.glow_color_override=glow_color_override;
     }
     animate(ticks:number):Promise<boolean> {
@@ -559,17 +533,6 @@ class BlockDisplay extends Entity{
             nbt+="}";
             this.command+=" "+nbt;
             this.parent.cmd(this.command).then((out:string)=>{if (out.includes("Modified entity data of")) resolve(true); else resolve(false);});
-        });
-    }
-    animateNoDelay(ticks:number):Promise<boolean> {
-        return new Promise<boolean>((resolve:(value:boolean)=>void)=>{
-            this.command = "data merge entity @e[nbt={Tags:[\""+this.uuid+"\",\"FromServer\",\"Displays\"]},limit=1]";
-            var nbt:string = "{";
-            nbt+="start_interpolation:0,interpolation_duration:"+ticks;
-            if (this.transformation!=null) nbt+=",transformation:"+Minecraft.transformationToString(this.transformation);
-            nbt+="}";
-            this.command+=" "+nbt;
-            this.parent.cmdNoOutput(this.command);
         });
     }
 }
@@ -596,47 +559,49 @@ mine.Emitter.on("playerChat",async(e:{name:string,chat:string,player:PlayerData,
     } else if (e.chat=="summonDoor") { e.preventDefault();
         var playerPos:Vec3<number> = (await mine.playerData[e.name].updatePos()) as Vec3<number>;
         door = [
-            mine.summonBlockDisplay( playerPos                                  ,"minecraft:spruce_door",{facing:"north",half:"lower",hinge:"left" ,open:"false"},{translation:[0,0,0],left_rotation:[0,0,0,1],scale:[1,1,1],right_rotation:[0,0,0,1]},[],false),
-            mine.summonBlockDisplay([playerPos[0]  ,playerPos[1]+1,playerPos[2]],"minecraft:spruce_door",{facing:"north",half:"upper",hinge:"left" ,open:"false"},{translation:[0,0,0],left_rotation:[0,0,0,1],scale:[1,1,1],right_rotation:[0,0,0,1]},[],false),
-            mine.summonBlockDisplay([playerPos[0]+1,playerPos[1]  ,playerPos[2]],"minecraft:spruce_door",{facing:"north",half:"lower",hinge:"right",open:"false"},{translation:[0,0,0],left_rotation:[0,0,0,1],scale:[1,1,1],right_rotation:[0,0,0,1]},[],false),
-            mine.summonBlockDisplay([playerPos[0]+1,playerPos[1]+1,playerPos[2]],"minecraft:spruce_door",{facing:"north",half:"upper",hinge:"right",open:"false"},{translation:[0,0,0],left_rotation:[0,0,0,1],scale:[1,1,1],right_rotation:[0,0,0,1]},[],false)
+            mine.summonBlockDisplay([playerPos[0]  ,playerPos[1]  ,playerPos[2]],["Door"],"minecraft:spruce_door",{facing:"east",  half:"lower", hinge:"left",  open:"false"},{...EmptyTransformationObj,translation:[0,0,1],right_rotation:[0,Math.sqrt(0.5),0,Math.sqrt(0.5)]}),
+            mine.summonBlockDisplay([playerPos[0]  ,playerPos[1]+1,playerPos[2]],["Door"],"minecraft:spruce_door",{facing:"east",  half:"upper", hinge:"left",  open:"false"},{...EmptyTransformationObj,translation:[0,0,1],right_rotation:[0,Math.sqrt(0.5),0,Math.sqrt(0.5)]}),
+            mine.summonBlockDisplay([playerPos[0]+1,playerPos[1]  ,playerPos[2]],["Door"],"minecraft:spruce_door",{facing:"south", half:"lower", hinge:"right", open:"false"},{...EmptyTransformationObj,translation:[1,0,1],right_rotation:[0,1,0,0]}),
+            mine.summonBlockDisplay([playerPos[0]+1,playerPos[1]+1,playerPos[2]],["Door"],"minecraft:spruce_door",{facing:"south", half:"upper", hinge:"right", open:"false"},{...EmptyTransformationObj,translation:[1,0,1],right_rotation:[0,1,0,0]})
         ];
-        door[0].addTags("Door");
         door[0].build();
-        door[1].addTags("Door");
         door[1].build();
-        door[2].addTags("Door");
         door[2].build();
-        door[3].addTags("Door");
         door[3].build();
-    } else if (e.chat=="rotateDoor" && door != null) { e.preventDefault();
-        (door[0].transformation as transformationObj).left_rotation = [0,0.703,0,0.711];
-        (door[0].transformation as transformationObj).translation = [-13/16,0,1];
-        (door[1].transformation as transformationObj).left_rotation = [0,0.703,0,0.711];
-        (door[1].transformation as transformationObj).translation = [-13/16,0,1];
-        door[0].animateNoDelay(10);
-        door[1].animateNoDelay(10);
+    } else if (e.chat=="open" && door != null) { e.preventDefault();
+        //door1
+        (door[0].transformation as transformationObj).left_rotation = [0,Math.sqrt(0.5),0,Math.sqrt(0.5)];
+        (door[0].transformation as transformationObj).translation   = [0.188,0,1];
+        (door[1].transformation as transformationObj).left_rotation = [0,Math.sqrt(0.5),0,Math.sqrt(0.5)];
+        (door[1].transformation as transformationObj).translation   = [0.188,0,1];
 
-        (door[2].transformation as transformationObj).left_rotation = [0,1,0,0];
-        (door[2].transformation as transformationObj).translation = [29/16,0,1];
-        (door[3].transformation as transformationObj).left_rotation = [0,1,0,0];
-        (door[3].transformation as transformationObj).translation = [29/16,0,1];
-        door[2].animateNoDelay(10);
-        door[3].animateNoDelay(10);
-    } else if (e.chat=="un-rotateDoor" && door != null) { e.preventDefault();
+        //door2
+        (door[2].transformation as transformationObj).left_rotation = [0,-Math.sqrt(0.5),0,Math.sqrt(0.5)];
+        (door[2].transformation as transformationObj).translation   = [0.813,0,1];
+        (door[3].transformation as transformationObj).left_rotation = [0,-Math.sqrt(0.5),0,Math.sqrt(0.5)];
+        (door[3].transformation as transformationObj).translation   = [0.813,0,1];
+
+        door[0].animate(10);
+        door[1].animate(10);
+        door[2].animate(10);
+        door[3].animate(10);
+    } else if (e.chat=="close" && door != null) { e.preventDefault();
+        //door1
         (door[0].transformation as transformationObj).left_rotation = [0,0,0,1];
-        (door[0].transformation as transformationObj).translation = [0,0,0];
+        (door[0].transformation as transformationObj).translation   = [0,0,1];
         (door[1].transformation as transformationObj).left_rotation = [0,0,0,1];
-        (door[1].transformation as transformationObj).translation = [0,0,0];
-        door[0].animateNoDelay(10);
-        door[1].animateNoDelay(10);
+        (door[1].transformation as transformationObj).translation   = [0,0,1];
 
+        //door2
         (door[2].transformation as transformationObj).left_rotation = [0,0,0,1];
-        (door[2].transformation as transformationObj).translation = [0,0,0];
+        (door[2].transformation as transformationObj).translation   = [1,0,1];
         (door[3].transformation as transformationObj).left_rotation = [0,0,0,1];
-        (door[3].transformation as transformationObj).translation = [0,0,0];
-        door[2].animateNoDelay(10);
-        door[3].animateNoDelay(10);
+        (door[3].transformation as transformationObj).translation   = [1,0,1];
+
+        door[0].animate(10);
+        door[1].animate(10);
+        door[2].animate(10);
+        door[3].animate(10);
     }
 });
 mine.Emitter.on("playerCmdOut",async (e:{name:string,out:string,player:PlayerData,preventDefault:()=>void})=>{
@@ -668,7 +633,7 @@ mine.Emitter.on("playerChat",async(e:{name:string,chat:string,player:PlayerData,
         var finalPos:Vec3<number> = (await mine.playerData[e.name].updatePos()) as Vec3<number>;
 
         if (displays.length!=0&&displayIndex!=-1) { var display = displays[displayIndex];display.glowing=false;display.update(); }
-        displays.push(mine.summonBlockDisplay(finalPos,"minecraft:diamond_block",null,{translation:[0,0,0],left_rotation:[0,0,0,1],scale:[1,1,1],right_rotation:[0,0,0,1]},[],true));
+        displays.push(mine.summonBlockDisplay(finalPos,[],"minecraft:diamond_block",null,EmptyTransformationObj,true));
         var display = displays[displays.length-1];
         display.build();
         displayIndex=displays.length-1;
@@ -678,7 +643,7 @@ mine.Emitter.on("playerChat",async(e:{name:string,chat:string,player:PlayerData,
         var finalPos:Vec3<number> = await relativePos(pos,playerPos);
 
         if (displays.length!=0) { var display = displays[displayIndex];display.glowing=false;display.update(); }
-        displays.push(mine.summonBlockDisplay(finalPos,"minecraft:diamond_block",null,{translation:[0,0,0],left_rotation:[0,0,0,1],scale:[1,1,1],right_rotation:[0,0,0,1]},[],true));
+        displays.push(mine.summonBlockDisplay(finalPos,[],"minecraft:diamond_block",null,EmptyTransformationObj,true));
         var display = displays[displays.length-1];
         display.build();
         displayIndex=displays.length-1;
