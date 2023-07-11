@@ -1,4 +1,19 @@
 "use strict";
+var __extends = (this && this.__extends) || (function () {
+    var extendStatics = function (d, b) {
+        extendStatics = Object.setPrototypeOf ||
+            ({ __proto__: [] } instanceof Array && function (d, b) { d.__proto__ = b; }) ||
+            function (d, b) { for (var p in b) if (Object.prototype.hasOwnProperty.call(b, p)) d[p] = b[p]; };
+        return extendStatics(d, b);
+    };
+    return function (d, b) {
+        if (typeof b !== "function" && b !== null)
+            throw new TypeError("Class extends value " + String(b) + " is not a constructor or null");
+        extendStatics(d, b);
+        function __() { this.constructor = d; }
+        d.prototype = b === null ? Object.create(b) : (__.prototype = b.prototype, new __());
+    };
+})();
 var __assign = (this && this.__assign) || function () {
     __assign = Object.assign || function(t) {
         for (var s, i = 1, n = arguments.length; i < n; i++) {
@@ -46,205 +61,7 @@ var __generator = (this && this.__generator) || function (thisArg, body) {
         if (op[0] & 5) throw op[1]; return { value: op[0] ? op[1] : void 0, done: true };
     }
 };
-var __spreadArray = (this && this.__spreadArray) || function (to, from, pack) {
-    if (pack || arguments.length === 2) for (var i = 0, l = from.length, ar; i < l; i++) {
-        if (ar || !(i in from)) {
-            if (!ar) ar = Array.prototype.slice.call(from, 0, i);
-            ar[i] = from[i];
-        }
-    }
-    return to.concat(ar || Array.prototype.slice.call(from));
-};
 Object.defineProperty(exports, "__esModule", { value: true });
-function newParameter(name, nullable, isPublic, defaultValue, type) {
-    return {
-        "name": name, "type": (type || (typeof defaultValue).replace("bigint", "number")), "nullable": nullable, "public": isPublic, "defaultValue": defaultValue
-    };
-}
-var WebSocket = require("ws");
-var Client = /** @class */ (function () {
-    function Client(name, isPublic) {
-        this.connectionMessage = {
-            type: "connection",
-            data: {
-                name: "Client",
-                functions: [],
-                public: true
-            }
-        };
-        this.functions = {};
-        this.intervalId = null;
-        this.attemts = 0;
-        this.onclose = null;
-        this.name = name;
-        this.public = isPublic;
-    }
-    Object.defineProperty(Client.prototype, "name", {
-        get: function () { return this.connectionMessage.data.name; },
-        set: function (v) { this.connectionMessage.data.name = v; },
-        enumerable: false,
-        configurable: true
-    });
-    Object.defineProperty(Client.prototype, "public", {
-        get: function () { return this.connectionMessage.data.public; },
-        set: function (v) { this.connectionMessage.data.public = v; },
-        enumerable: false,
-        configurable: true
-    });
-    Client.prototype.SetupWebsocket = function () {
-        var _this = this;
-        try {
-            this.ws.send(JSON.stringify(this.connectionMessage));
-            this.ws.onerror = function (err) { console.log("Websocket error: \"" + err + "\"."); };
-            this.ws.onmessage = function (e) {
-                var _a;
-                try {
-                    if (_this.ws == null)
-                        return;
-                    var msg = JSON.parse(e.data);
-                    if (msg.type != null) {
-                        if (msg.type == "ping" && msg.data != null) {
-                            _this.ws.send(JSON.stringify({ type: "pong", data: msg.data }));
-                        }
-                        else if (msg.type == "command" && msg.data != null) {
-                            var funcName = msg.data.toLowerCase();
-                            if (_this.functions[funcName] == null) {
-                                console.log("invalid command");
-                                console.log(msg);
-                                return;
-                            }
-                            if (msg.parameters != null && msg.parameters.length > 0) {
-                                (_a = _this.functions)[funcName].apply(_a, __spreadArray([_this], msg.parameters, false));
-                            }
-                            else {
-                                _this.functions[funcName](_this);
-                            }
-                        }
-                        else if (msg.type == "reply") {
-                            if (msg.statusCode != 200) {
-                                console.log("Connection failed, status " + msg.status);
-                                console.log("Error message: \"" + msg.error + "\"");
-                                console.log("Error id: \"" + msg.id + "\"");
-                            }
-                        }
-                        else if (msg.type == "status") {
-                            if (msg.statusCode != 200) {
-                                console.log("Command fail, status " + msg.status);
-                                console.log("Error message: \"" + msg.error + "\"");
-                                console.log("Error id: \"" + msg.id + "\"");
-                            }
-                        }
-                    }
-                    else
-                        console.log("Error, msg type is null.");
-                }
-                catch (err) {
-                    console.log(err);
-                }
-            };
-            this.ws.onclose = function (e) {
-                console.log("Lost connection to MOCS server.");
-                _this.ws = null;
-                if (_this.onclose != null)
-                    try {
-                        _this.onclose();
-                    }
-                    catch (err) { }
-                _this.setReconnectInterval(true);
-            };
-        }
-        catch (err) {
-            console.log(err.stack);
-        }
-        return this;
-    };
-    Client.prototype.setReconnectInterval = function (reconnection) {
-        var _this = this;
-        // attempt to connect every 20 seconds untill it works and then stop.
-        this.tryReconnect(reconnection);
-        this.intervalId = setInterval(function () {
-            _this.tryReconnect(reconnection);
-        }, 15000);
-        return this;
-    };
-    Client.prototype.tryReconnect = function (reconnection) {
-        var _this = this;
-        if (this.ws != null) {
-            try {
-                this.ws.close();
-            }
-            catch (err) {
-                console.log(err.stack);
-            }
-            this.ws = null;
-        }
-        ;
-        this.attemts++;
-        console.log("Attempt #" + this.attemts + " to connect to the MOCS server.");
-        this.ws = new WebSocket(Client.URL);
-        this.ws.onerror = function (e) { if (_this.ws != null) {
-            if (_this.onclose != null)
-                try {
-                    _this.onclose();
-                }
-                catch (err) { }
-            try {
-                _this.ws.close();
-            }
-            catch (err) {
-                console.log(err.stack);
-            }
-            _this.ws = null;
-        } };
-        this.ws.onclose = function (e) { if (_this.ws != null) {
-            if (_this.onclose != null)
-                try {
-                    _this.onclose();
-                }
-                catch (err) { }
-            _this.ws = null;
-        } };
-        this.ws.onopen = function () {
-            _this.stopInterval(); // stop loop.
-            //console.clear();
-            console.log((reconnection == true ? "Rec" : "C") + "onnected to MOCS server" + ((_this.attemts > 1) ? " after " + _this.attemts + " attempts." : "."));
-            _this.attemts = 0;
-            _this.SetupWebsocket();
-        };
-        return this;
-    };
-    Client.prototype.stopInterval = function () { if (this.intervalId != null) {
-        clearInterval(this.intervalId);
-        this.intervalId = null;
-    } return this; };
-    Client.prototype.AddFunction = function (name, isPublic, parameters, func) {
-        this.connectionMessage.data.functions.push({ "name": name, "public": isPublic, "parameters": parameters });
-        this.functions[name.toLowerCase() + "()"] = func;
-        return this;
-    };
-    Client.prototype.AddChildFunction = function (devicename, devicePublic, functionName, functionPublic, parameters, func) {
-        var devices = this.connectionMessage.data.devices;
-        if (devices == null)
-            devices = [];
-        var index = devices.findIndex(function (el) { return el.name == devicename; });
-        if (index == -1) {
-            index = devices.length;
-            devices.push({ name: devicename, "public": devicePublic, functions: [] });
-        }
-        devices[index].functions.push({ "name": functionName, "public": functionPublic, "parameters": parameters });
-        this.connectionMessage.data.devices = devices;
-        this.functions[devicename.toLowerCase() + "." + functionName.toLowerCase() + "()"] = func;
-        return this;
-    };
-    Client.prototype.listen = function () {
-        this.setReconnectInterval();
-        return this;
-    };
-    //static URL:string = "ws://mc.campbellsimpson.com:42069";
-    Client.URL = "ws://192.168.1.37:42069";
-    return Client;
-}());
-//#endregion typeDefs
 var Colors = /** @class */ (function () {
     function Colors() {
     }
@@ -309,83 +126,7 @@ function generateUUID() {
         return (c === 'x' ? b : (b & 0x3 | 0x8)).toString(16);
     });
 }
-var BlockDisplay = /** @class */ (function () {
-    function BlockDisplay(parent, pos, Name, Tags, Properties, transformation) {
-        this.parent = parent;
-        this.pos = pos;
-        this.blockState = { "Name": Name, "Properties": Properties };
-        this.transformation = transformation;
-        this.uuid = generateUUID();
-        this.Tags = Tags || [];
-        this.Tags.push(this.uuid);
-        this.command = "summon minecraft:block_display " + pos[0] + " " + pos[1] + " " + pos[2];
-        var blockStateStr = "{Name:\"" + Name + "\"";
-        if (Properties != null) {
-            blockStateStr += ",Properties:{" + Object.entries(Properties).map(function (_a) {
-                var key = _a[0], value = _a[1];
-                return key + ":\"" + value + "\"";
-            }).join(",") + "}";
-        }
-        blockStateStr += "}";
-        var nbt = "{block_state:" + blockStateStr;
-        if (transformation != null)
-            nbt += ",transformation:" + Minecraft.transformationToString(transformation);
-        nbt += ",Tags:[" + (Tags || []).map(function (el) { return "\"" + el + "\""; }).join(",") + "]";
-        nbt += ",CustomName:\"\\\"" + this.uuid + "\\\"\",CustomNameVisible:0";
-        nbt += ",Pos:[" + pos[0] + "d," + pos[1] + "d," + pos[2] + "d]";
-        nbt += "}";
-        this.command += " " + nbt;
-    }
-    BlockDisplay.prototype.build = function () {
-        return __awaiter(this, void 0, void 0, function () {
-            var _this = this;
-            return __generator(this, function (_a) {
-                return [2 /*return*/, new Promise(function (resolve) {
-                        _this.parent.cmd(_this.command).then(function (out) { if (out.includes("Summoned new "))
-                            resolve(true);
-                        else
-                            resolve(false); });
-                    })];
-            });
-        });
-    };
-    BlockDisplay.prototype.kill = function () {
-        var _this = this;
-        return new Promise(function (resolve) {
-            _this.parent.cmd("kill @e[nbt={Tags:[\"" + _this.uuid + "\"]}]").then(function (out) { if (out.match(/Killed \d+/g) != null)
-                resolve(true);
-            else
-                resolve(false); });
-        });
-    };
-    BlockDisplay.prototype.update = function () {
-        var _this = this;
-        return new Promise(function (resolve) {
-            _this.command = "data merge entity @e[nbt={Tags:[\"" + _this.uuid + "\"]},limit=1]";
-            var blockStateStr = "{Name:\"" + _this.blockState.Name + "\"";
-            if (_this.blockState.Properties != null) {
-                blockStateStr += ",Properties:{" + Object.entries(_this.blockState.Properties).map(function (_a) {
-                    var key = _a[0], value = _a[1];
-                    return key + ":\"" + value + "\"";
-                }).join(",") + "}";
-            }
-            blockStateStr += "}";
-            var nbt = "{block_state:" + blockStateStr;
-            if (_this.transformation != null)
-                nbt += ",transformation:" + Minecraft.transformationToString(_this.transformation);
-            nbt += ",Tags:[" + (_this.Tags || []).map(function (el) { return "\"" + el + "\""; }).join(",") + "]";
-            nbt += ",CustomName:\"\\\"" + _this.uuid + "\\\"\",CustomNameVisible:0";
-            nbt += ",Pos:[" + _this.pos[0] + "d," + _this.pos[1] + "d," + _this.pos[2] + "d]";
-            nbt += "}";
-            _this.command += " " + nbt;
-            _this.parent.cmd(_this.command).then(function (out) { if (out.includes("Modified entity data of"))
-                resolve(true);
-            else
-                resolve(false); });
-        });
-    };
-    return BlockDisplay;
-}());
+var EmptyTransformationObj = { translation: [0, 0, 0], left_rotation: [0, 0, 0, 1], scale: [1, 1, 1], right_rotation: [0, 0, 0, 1] };
 var Minecraft = /** @class */ (function () {
     function Minecraft() {
         var _this = this;
@@ -394,7 +135,6 @@ var Minecraft = /** @class */ (function () {
         console.clear();
         this.cmdQueue = [];
         this.cmdResolves = [];
-        this.waiting = false;
         this.server = (0, child_process_1.spawn)("java", ["-Xmx5G", "-Xms5G", "-jar", "./server.jar", "nogui"], { cwd: __dirname + "/server" });
         this.server.stdout.on('data', function (stdout) {
             var out = stdout.toString().trim();
@@ -415,19 +155,38 @@ var Minecraft = /** @class */ (function () {
                 return [2 /*return*/, new Promise(function (resolve) {
                         _this.cmdQueue.push(stdin);
                         _this.cmdResolves.push(resolve);
-                        _this.runNextCmd();
+                        _this.server.stdin.write(stdin + "\n");
                     })];
             });
         });
     };
-    Minecraft.prototype.cmdNoOutput = function (stdin) {
+    Minecraft.prototype.cmdDiscardOutput = function (stdin) {
+        this.cmdQueue.push(stdin);
+        this.cmdResolves.push("none");
         this.server.stdin.write(stdin + "\n");
     };
-    Minecraft.prototype.runNextCmd = function () {
-        if (!this.waiting && this.cmdQueue.length > 0) {
-            this.server.stdin.write(this.cmdQueue[0] + "\n");
-            this.waiting = true;
-        }
+    Minecraft.prototype.getPlayerPos = function (name) {
+        var _this = this;
+        return new Promise(function (resolve) { return __awaiter(_this, void 0, void 0, function () {
+            var out, data, nbt;
+            return __generator(this, function (_a) {
+                switch (_a.label) {
+                    case 0: return [4 /*yield*/, mine.cmd("data get entity " + name)];
+                    case 1:
+                        out = _a.sent();
+                        if (out.match(/\S+ has the following entity data: /g) != null) {
+                            data = "" + out.match(/(?<=\S+ has the following entity data: ).+/g);
+                            nbt = Minecraft.parseNbt(data);
+                            mine.playerData[name].nbt = nbt;
+                            mine.playerData[name].pos = nbt.Pos;
+                            resolve([Math.floor(nbt.Pos[0]), Math.floor(nbt.Pos[1]), Math.floor(nbt.Pos[2])]);
+                        }
+                        else
+                            resolve([0, 0, 0]);
+                        return [2 /*return*/];
+                }
+            });
+        }); });
     };
     Minecraft.prototype.handle = function (line) {
         var _this = this;
@@ -449,6 +208,8 @@ var Minecraft = /** @class */ (function () {
                 json.type = "Worker-Main/INFO";
             else if (json.type.match(/(User Authenticator #\d\/INFO)/g) != null)
                 json.type = "User Authenticator/INFO";
+            else if (json.type.match(/(User Authenticator #\d\/ERROR)/g) != null)
+                json.type = "User Authenticator/ERROR";
             json.data = splt.join(" ");
             switch (json.type) {
                 case "ServerMain/INFO":
@@ -508,7 +269,7 @@ var Minecraft = /** @class */ (function () {
                     else if (json.data.startsWith("Done")) {
                         console.log(Colors.Fgra + "Total time: " + Colors.Fy + (json.data.match(/(?<=Done \()\d+\.\d+s/g)) + Colors.Fgra + "." + Colors.R);
                         console.log(Colors.Fgre + "Server started" + Colors.R);
-                        this.Emitter.emit("serverStart");
+                        this.Emitter.emit("serverStart", { "preventDefault": (function () { }) });
                         return;
                     }
                     else if (json.data.includes("logged in with entity id")) {
@@ -535,25 +296,34 @@ var Minecraft = /** @class */ (function () {
                         if (tmpData.pos)
                             this.playerData[name_2].pos = tmpData.pos;
                         this.playerData[name_2].online = true;
-                        console.log(Colors.Fgra + Colors.Fy + name_2 + " has joined." + Colors.R);
+                        this.playerData[name_2].updatePos = function () { return __awaiter(_this, void 0, void 0, function () { return __generator(this, function (_a) {
+                            return [2 /*return*/, this.getPlayerPos(name_2)];
+                        }); }); };
                         this.cmd("data get entity " + name_2).then(function (out) {
                             if (out.match(/\S+ has the following entity data: /g) != null) {
                                 var data = "" + out.match(/(?<=\S+ has the following entity data: ).+/g);
-                                var nbt = _this.parseNbt(data);
+                                var nbt = Minecraft.parseNbt(data);
                                 _this.playerData[name_2].nbt = nbt;
                                 _this.playerData[name_2].pos = nbt.Pos;
                                 //console.log(Colors.Fgra+user+": "+Colors.R); console.log(nbt);
                                 return;
                             }
                         });
-                        this.Emitter.emit("playerJoined", name_2);
+                        var doDefault = true;
+                        this.Emitter.emit("playerJoined", { "name": name_2, "player": this.playerData[name_2], "preventDefault": (function () { doDefault = false; }) });
+                        if (doDefault) {
+                            console.log(Colors.Fgra + Colors.Fy + name_2 + " has joined." + Colors.R);
+                        }
                         return;
                     }
-                    else if (json.data.endsWith(" left the game")) {
+                    else if (json.data.endsWith(" left the game")) { //playerLeft
                         var name_3 = "" + json.data.match(/\S*(?= left the game)/);
                         this.playerData[name_3].online = false;
-                        console.log(Colors.Fgra + Colors.Fy + name_3 + " has left." + Colors.R);
-                        this.Emitter.emit("playerLeft", name_3);
+                        var doDefault = true;
+                        this.Emitter.emit("playerLeft", { "name": name_3, "player": this.playerData[name_3], "preventDefault": (function () { doDefault = false; }) });
+                        if (doDefault) {
+                            console.log(Colors.Fgra + Colors.Fy + name_3 + " has left." + Colors.R);
+                        }
                         return;
                     }
                     else if (json.data == "Stopping server") {
@@ -585,7 +355,7 @@ var Minecraft = /** @class */ (function () {
                         json.data == "Saving worlds") {
                         return; //nothing
                     }
-                    else if (json.data.match(/\[\w*: .*\]/g) != null) {
+                    else if (json.data.match(/\[\w*: .*\]/g) != null) { //playerCmdOut
                         var name_4 = "" + json.data.match(/(?<=\[)\w*(?=: .*\])/g);
                         var out = "" + json.data.match(/(?<=\[\w*: ).*(?=\])/g);
                         var timSplt = json.time.split(":");
@@ -594,11 +364,14 @@ var Minecraft = /** @class */ (function () {
                         date.setMinutes(timSplt[1]);
                         date.setSeconds(timSplt[2]);
                         this.playerData[name_4].cmdOuts.push([out, date.getTime()]);
-                        console.log(Colors.Fgra + "[" + name_4 + ": " + out + "]" + Colors.R);
-                        this.Emitter.emit("playerCmdOut", name_4, out);
+                        var doDefault = true;
+                        this.Emitter.emit("playerCmdOut", { "name": name_4, "out": out, "player": this.playerData[name_4], "preventDefault": (function () { doDefault = false; }) });
+                        if (doDefault) {
+                            console.log(Colors.Fgra + "[" + name_4 + ": " + out + "]" + Colors.R);
+                        }
                         return;
                     }
-                    else if (json.data.match(/(<|\[)\w*(>|\]) .*/g) != null) {
+                    else if (json.data.match(/(<|\[)\w*(>|\]) .*/g) != null) { //playerChat
                         var name_5 = "" + json.data.match(/(?<=(<|\[))\w*(?=(>|\]) .*)/g);
                         var chat = "" + json.data.match(/(?<=(<|\[)\w*(>|\]) ).*/g);
                         var timSplt = json.time.split(":");
@@ -607,8 +380,11 @@ var Minecraft = /** @class */ (function () {
                         date.setMinutes(timSplt[1]);
                         date.setSeconds(timSplt[2]);
                         this.playerData[name_5].chats.push([chat, date.getTime()]);
-                        console.log(Colors.Fgra + "<" + name_5 + "> " + chat + Colors.R);
-                        this.Emitter.emit("playerChat", name_5, chat);
+                        var doDefault = true;
+                        this.Emitter.emit("playerChat", { "name": name_5, "chat": chat, "player": this.playerData[name_5], "preventDefault": (function () { doDefault = false; }) });
+                        if (doDefault) {
+                            console.log(Colors.Fgra + "<" + name_5 + "> " + chat + Colors.R);
+                        }
                         return;
                     }
                     else {
@@ -637,12 +413,15 @@ var Minecraft = /** @class */ (function () {
                         console.log(json);
                         break;
                     }
+                case "User Authenticator/INFO":
+                    console.log(json);
+                    break;
                 default:
                     console.log(Colors.Fgra + "Unknown type " + Colors.Fgre + "\"" + json.type + "\"" + Colors.Fgra + "." + Colors.R);
                     console.log(json);
                     break;
             }
-            console.log(line);
+            console.log(Colors.Fgra + line + Colors.R);
             return;
         }
         catch (err) {
@@ -652,9 +431,8 @@ var Minecraft = /** @class */ (function () {
             console.log(err);
         }
     };
-    Minecraft.prototype.parseNbt = function (nbt) {
+    Minecraft.parseNbt = function (nbt) {
         frontTrim();
-        var out = {};
         function parseValue() {
             if (nbt[0] == "{") { //object
                 return parseObj();
@@ -662,8 +440,11 @@ var Minecraft = /** @class */ (function () {
             else if (nbt[0] == "[") { //array
                 return parseArray();
             }
+            else if (nbt[0] == "'") { //string
+                return parseStringSingle();
+            }
             else if (nbt[0] == "\"") { //string
-                return parseString();
+                return parseStringDouble();
             }
             else if (nbt[0] == "-" || digits.includes(nbt[0])) { //number
                 return parseNumber();
@@ -758,8 +539,8 @@ var Minecraft = /** @class */ (function () {
             //console.log("\""+ary+"\"");
             return ary;
         }
-        function parseString() {
-            if (!nbt.startsWith("\"") && !nbt.startsWith("'")) {
+        function parseStringSingle() {
+            if (!nbt.startsWith("'")) {
                 console.log("8");
                 console.log(nbt);
                 return null;
@@ -767,7 +548,7 @@ var Minecraft = /** @class */ (function () {
             nbt = nbt.substring(1);
             var ind = -1;
             for (var i = 0; i < nbt.length; i++) {
-                if ((nbt[i] == "\"" || nbt[i] == "'") && nbt[i - 1] != "\\") {
+                if (nbt[i] == "'" && nbt[i - 1] != "\\") {
                     ind = i;
                     break;
                 }
@@ -782,15 +563,39 @@ var Minecraft = /** @class */ (function () {
             //console.log("\""+str+"\"");
             return str;
         }
+        function parseStringDouble() {
+            if (!nbt.startsWith("\"")) {
+                console.log("10");
+                console.log(nbt);
+                return null;
+            }
+            nbt = nbt.substring(1);
+            var ind = -1;
+            for (var i = 0; i < nbt.length; i++) {
+                if (nbt[i] == "\"" && nbt[i - 1] != "\\") {
+                    ind = i;
+                    break;
+                }
+            }
+            if (ind == -1) {
+                console.log("11");
+                console.log(nbt);
+                return null;
+            }
+            var str = nbt.substring(0, ind);
+            nbt = nbt.substring(ind + 1);
+            //console.log("\""+str+"\"");
+            return str;
+        }
         function parseNumber() {
-            var num = nbt.match(/^-?\d+(\.\d+)?(s|S|b|B|d|D|f|F)?/g);
+            var num = nbt.match(/^-?\d+(\.\d+)?(s|S|b|B|d|D|f|F|L)?/g);
             if (num != null) {
                 nbt = nbt.substring(num[0].length);
                 //console.log("\""+num[0]+"\"");
                 return parseFloat(num[0]);
             }
             else {
-                console.log("10");
+                console.log("12");
                 console.log(nbt);
                 return null;
             }
@@ -807,7 +612,7 @@ var Minecraft = /** @class */ (function () {
                 return false;
             }
             else {
-                console.log("11");
+                console.log("13");
                 console.log(nbt);
                 return null;
             }
@@ -815,14 +620,13 @@ var Minecraft = /** @class */ (function () {
         return parseValue();
     };
     Minecraft.prototype.serverCmdOut = function (out) {
-        if (this.waiting && this.cmdResolves.length > 0) {
+        if (this.cmdResolves.length > 0) {
             if (out != "Unknown or incomplete command, see below for error") {
                 this.cmdQueue.shift();
                 var resolve = this.cmdResolves.shift();
-                this.waiting = false;
-                if (resolve != null)
+                if (resolve != "none") {
                     resolve(out);
-                this.runNextCmd();
+                }
             }
         }
         //console.log(Colors.Fgra+"[Server]: "+out+Colors.R);
@@ -840,103 +644,707 @@ var Minecraft = /** @class */ (function () {
             return str;
         }
     };
-    Minecraft.prototype.summonBlockDisplay = function (pos, Name, Properties, transformation, Tags) {
-        return new BlockDisplay(this, pos, Name, Tags, Properties, transformation);
+    Minecraft.prototype.summonBlockDisplay = function (Pos, Tags, identifier, Name, Properties, transformation, glowing, glow_color_override) {
+        return new BlockDisplay(this, Pos, Tags, identifier, Name, Properties, transformation, glowing, glow_color_override);
+    };
+    Minecraft.prototype.summonInteraction = function (Pos, Tags, identifier, width, height, response) {
+        return new Interaction(this, Pos, Tags, identifier, width, height, response);
     };
     return Minecraft;
 }());
-var mine = new Minecraft();
-var myClient = new Client("McServer", true)
-    .AddFunction("cmd", true, [
-    newParameter("cmd", false, true, "tp __Curse -3 86 3")
-], function (client, input) {
-    //console.log(Colors.Fgra+"Cmd: "+Colors.Fgre+(input as string));
-    if (input.startsWith("tellraw")) {
-        mine.cmdNoOutput(input);
+var Entity = /** @class */ (function () {
+    function Entity(parent, entityName, Pos, Tags, identifier) {
+        this.nbt = {};
+        this.position = [0, 0, 0];
+        this.parent = parent;
+        this.entityName = entityName;
+        this.nbt = { Tags: (Tags || []).map(function (el) { return "\"" + el + "\""; }) };
+        if (identifier) {
+            this.uuid = identifier;
+        }
+        else {
+            this.uuid = generateUUID();
+        }
+        if (!this.nbt.Tags.includes("\"" + this.uuid + "\""))
+            this.addTags(this.uuid);
+        if (!this.nbt.Tags.includes("\"FromServer"))
+            this.addTags("FromServer");
+        this.selector = "@e[nbt={Tags:[\"" + this.uuid + "\",\"FromServer\"]},limit=1]";
+        this.Pos = Pos;
     }
-    else {
-        mine.cmd(input).then(function (out) {
-            console.log(Colors.Fgre + input + Colors.Fgra + " : " + Colors.Fgre + out + Colors.R);
-        });
-    }
-})
-    .AddFunction("print", true, [], function (client) {
-    console.log(mine.playerData);
-    Object.entries(mine.playerData).forEach(function (_a) {
-        var player = _a[0], data = _a[1];
-        var tmpData = __assign({}, data);
-        delete tmpData.nbt;
-        mine.cmdNoOutput("tellraw " + player + " \"" + JSON.stringify(tmpData, null, 4).split("\n").join("\\n").split("\"").join("\\\"") + "\"");
+    Entity.prototype.addTags = function () {
+        var _a;
+        var tags = [];
+        for (var _i = 0; _i < arguments.length; _i++) {
+            tags[_i] = arguments[_i];
+        }
+        (_a = this.nbt.Tags).push.apply(_a, (tags.map(function (el) { return "\"" + el + "\""; })));
+        return this;
+    };
+    Object.defineProperty(Entity.prototype, "Pos", {
+        get: function () { return this.position; },
+        set: function (value) { this.position = value; this.nbt.Pos = value.map(function (el) { return el.toString() + "d"; }); },
+        enumerable: false,
+        configurable: true
     });
+    ;
+    ;
+    Entity.prototype.build = function () {
+        return __awaiter(this, void 0, void 0, function () {
+            var _this = this;
+            return __generator(this, function (_a) {
+                return [2 /*return*/, new Promise(function (resolve) {
+                        var command = "summon " + _this.entityName + " 0 0 0 {Tags:[" + _this.nbt.Tags.join(",") + "]}";
+                        _this.parent.cmd(command).then(function (out) { if (out.includes("Summoned new "))
+                            resolve(true);
+                        else
+                            resolve(false); });
+                        _this.update();
+                    })];
+            });
+        });
+    };
+    Entity.prototype.update = function () {
+        var _this = this;
+        return new Promise(function (resolve) {
+            var command = "data merge entity " + _this.selector;
+            var nbt = "{" + Object.entries(_this.nbt).map(function (_a) {
+                var key = _a[0], value = _a[1];
+                if ((typeof value) == "object")
+                    return key + ":[" + value.join(",") + "]";
+                else
+                    return key + ":" + value;
+            }).join(",") + "}";
+            command += " " + nbt;
+            _this.parent.cmd(command).then(function (out) { if (out.includes("Modified entity data of"))
+                resolve(true);
+            else
+                resolve(false); });
+        });
+    };
+    Entity.prototype.kill = function () {
+        var _this = this;
+        return new Promise(function (resolve) {
+            _this.parent.cmd("kill " + _this.selector).then(function (out) { if (out.match(/Killed \d+/g) != null)
+                resolve(true);
+            else
+                resolve(false); });
+        });
+    };
+    Entity.prototype.savetoFile = function (name) {
+        var str = JSON.stringify(this.toJson());
+        fs.writeFileSync(__dirname + "/Saves/" + name + ".json", str);
+    };
+    Entity.prototype.toJson = function () {
+        return {
+            "uuid": this.uuid,
+            "nbt": this.nbt
+        };
+    };
+    return Entity;
+}());
+var BlockDisplay = /** @class */ (function (_super) {
+    __extends(BlockDisplay, _super);
+    function BlockDisplay(parent, Pos, Tags, identifier, Name, Properties, transformation, glowing, glow_color_override) {
+        var _this = _super.call(this, parent, "minecraft:block_display", Pos, Tags, identifier) || this;
+        _this.actualTransformation = EmptyTransformationObj;
+        _this.glowColorOverride = 16383998; // https://www.digminecraft.com/lists/dyed_armor_color_list_pc.php
+        _this.addTags("Displays", "BlockDisplays");
+        _this.nbt.CustomName = "\"\\\"" + _this.uuid + "\\\"\"";
+        _this.nbt.CustomNameVisible = "0";
+        _this.blockState = { Name: "" };
+        _this.blockStateName = Name;
+        if (Properties)
+            _this.blockStateProperties = Properties;
+        if (transformation)
+            _this.transformation = transformation;
+        if (glowing)
+            _this.glowing = glowing;
+        if (glow_color_override)
+            _this.glow_color_override = glow_color_override;
+        return _this;
+    }
+    BlockDisplay.prototype.addTags = function () {
+        var tags = [];
+        for (var _i = 0; _i < arguments.length; _i++) {
+            tags[_i] = arguments[_i];
+        }
+        _super.prototype.addTags.apply(this, tags);
+        return this;
+    };
+    BlockDisplay.prototype.setBlockState = function () {
+        var blockStateStr = "{Name:\"" + this.blockState.Name + "\"";
+        if (this.blockState.Properties != null) {
+            blockStateStr += ",Properties:{" + Object.entries(this.blockState.Properties).map(function (_a) {
+                var key = _a[0], value = _a[1];
+                return key + ":\"" + value + "\"";
+            }).join(",") + "}";
+        }
+        blockStateStr += "}";
+        this.nbt.block_state = blockStateStr;
+    };
+    Object.defineProperty(BlockDisplay.prototype, "blockStateName", {
+        get: function () { return this.blockState.Name; },
+        set: function (value) { this.blockState.Name = value; this.setBlockState(); },
+        enumerable: false,
+        configurable: true
+    });
+    ;
+    ;
+    Object.defineProperty(BlockDisplay.prototype, "blockStateProperties", {
+        get: function () { return this.blockState.Properties; },
+        set: function (value) { this.blockState.Properties = value; this.setBlockState(); },
+        enumerable: false,
+        configurable: true
+    });
+    ;
+    ;
+    Object.defineProperty(BlockDisplay.prototype, "transformation", {
+        get: function () { return this.actualTransformation; },
+        set: function (value) { this.actualTransformation = value; this.nbt.transformation = Minecraft.transformationToString(value); },
+        enumerable: false,
+        configurable: true
+    });
+    ;
+    ;
+    Object.defineProperty(BlockDisplay.prototype, "glowing", {
+        get: function () { return this.nbt.Glowing == "true"; },
+        set: function (value) { this.nbt.Glowing = value.toString(); },
+        enumerable: false,
+        configurable: true
+    });
+    ;
+    ;
+    Object.defineProperty(BlockDisplay.prototype, "glow_color_override", {
+        get: function () { return this.glowColorOverride; },
+        set: function (value) { this.glowColorOverride = value; this.nbt.glow_color_override = value.toString(); },
+        enumerable: false,
+        configurable: true
+    });
+    ;
+    ;
+    BlockDisplay.prototype.animate = function (ticks) {
+        var _this = this;
+        return new Promise(function (resolve) {
+            _this.command = "data merge entity " + _this.selector;
+            var nbt = "{";
+            nbt += "start_interpolation:0,interpolation_duration:" + ticks;
+            if (_this.transformation != null)
+                nbt += ",transformation:" + Minecraft.transformationToString(_this.transformation);
+            nbt += "}";
+            _this.command += " " + nbt;
+            _this.parent.cmd(_this.command).then(function (out) { if (out.includes("Modified entity data of"))
+                resolve(true);
+            else
+                resolve(false); });
+        });
+    };
+    BlockDisplay.fromJson = function (parent, json) {
+        var blockState = Minecraft.parseNbt(json.nbt.block_state);
+        var transformation = (json.nbt.transformation != null) ? Minecraft.parseNbt(json.nbt.transformation) : null;
+        var out = new BlockDisplay(parent, json.nbt.Pos.map(function (el) { return parseFloat(el); }), json.nbt.Tags.map(function (el) { return ((el.match(/(?<=").*(?=")/g) || [""])[0]); }), json.uuid, blockState.Name, blockState.Properties, transformation, (json.nbt.glowing != null) ? (json.nbt.glowing == "true") : null, (json.nbt.glow_color_override != null) ? parseInt(json.nbt.glow_color_override) : null);
+        out.nbt = json.nbt;
+        return out;
+    };
+    BlockDisplay.fromFile = function (parent, name) {
+        try {
+            return BlockDisplay.fromJson(parent, JSON.parse(fs.readFileSync(__dirname + "/Saves/" + name + ".json").toString()));
+        }
+        catch (err) {
+            //console.log(err);
+            return undefined;
+        }
+    };
+    return BlockDisplay;
+}(Entity));
+var Interaction = /** @class */ (function (_super) {
+    __extends(Interaction, _super);
+    function Interaction(parent, Pos, Tags, identifier, width, height, response) {
+        var _this = _super.call(this, parent, "minecraft:interaction", Pos, Tags, identifier) || this;
+        _this.ignoreNextInteraction = false;
+        _this.ignoreNextAttack = false;
+        _this.addTags("Interactions");
+        _this.nbt.CustomName = "\"\\\"" + _this.uuid + "\\\"\"";
+        _this.nbt.CustomNameVisible = "0";
+        _this.width = width;
+        _this.height = height;
+        _this.response = response;
+        return _this;
+    }
+    Interaction.prototype.addTags = function () {
+        var tags = [];
+        for (var _i = 0; _i < arguments.length; _i++) {
+            tags[_i] = arguments[_i];
+        }
+        _super.prototype.addTags.apply(this, tags);
+        return this;
+    };
+    Object.defineProperty(Interaction.prototype, "width", {
+        get: function () { return parseFloat(this.nbt.width); },
+        set: function (value) { this.nbt.width = value.toString(); },
+        enumerable: false,
+        configurable: true
+    });
+    ;
+    ;
+    Object.defineProperty(Interaction.prototype, "height", {
+        get: function () { return parseFloat(this.nbt.height); },
+        set: function (value) { this.nbt.height = value.toString(); },
+        enumerable: false,
+        configurable: true
+    });
+    ;
+    ;
+    Object.defineProperty(Interaction.prototype, "response", {
+        get: function () { return this.nbt.response == "true"; },
+        set: function (value) { this.nbt.response = value.toString(); },
+        enumerable: false,
+        configurable: true
+    });
+    ;
+    ;
+    Interaction.prototype.build = function () {
+        this.start();
+        return _super.prototype.build.call(this);
+    };
+    Interaction.prototype.kill = function () {
+        if (this.intervalId != null) {
+            clearInterval(this.intervalId);
+            this.intervalId = undefined;
+        }
+        return _super.prototype.kill.call(this);
+    };
+    Interaction.prototype.start = function () {
+        var _this = this;
+        this.intervalId = setInterval(function () {
+            _this.parent.cmd("data get entity " + _this.selector).then(function (out) {
+                if (out != "No entity was found") {
+                    var match = out.match(/^\S+ has the following entity data: {.*}$/g);
+                    if (match != null) {
+                        var nbt = Minecraft.parseNbt(out.match(/(?<=^\S+ has the following entity data: ){.*}$/g)[0]);
+                        if (nbt.interaction != null) {
+                            if (_this.ignoreNextInteraction) {
+                                _this.ignoreNextInteraction = false;
+                                return;
+                            } //buffers one detection to reset
+                            else {
+                                _this.ignoreNextInteraction = true;
+                            }
+                            //console.log(Colors.Fgra+"Interact: "+Colors.Fgre+this.uuid+Colors.R)
+                            //console.log(nbt.interaction);
+                            _this.parent.cmd("data remove entity " + _this.selector + " interaction");
+                            if (_this.onInteraction != null)
+                                _this.onInteraction(nbt);
+                        }
+                        else if (nbt.attack != null) {
+                            if (_this.ignoreNextAttack) {
+                                _this.ignoreNextAttack = false;
+                                return;
+                            } //buffers one detection to reset
+                            else {
+                                _this.ignoreNextAttack = true;
+                            }
+                            //console.log(Colors.Fgra+"Attack: "+Colors.Fgre+this.uuid+Colors.R)
+                            //console.log(nbt.attack);
+                            _this.parent.cmd("data remove entity " + _this.selector + " attack");
+                            if (_this.onAttack != null)
+                                _this.onAttack(nbt);
+                        }
+                    }
+                }
+            });
+        }, 1000 / 20); //one tick
+    };
+    Interaction.fromJson = function (parent, json) {
+        return new Interaction(parent, json.nbt.Pos.map(function (el) { return parseFloat(el); }), json.nbt.Tags.map(function (el) { return ((el.match(/(?<=").*(?=")/g) || [""])[0]); }), json.uuid, parseFloat(json.nbt.width), parseFloat(json.nbt.height), json.nbt.response == "true");
+    };
+    Interaction.fromFile = function (parent, name) {
+        try {
+            return Interaction.fromJson(parent, JSON.parse(fs.readFileSync(__dirname + "/Saves/" + name + ".json").toString()));
+        }
+        catch (err) {
+            //console.log(err);
+            return undefined;
+        }
+    };
+    return Interaction;
+}(Entity));
+var mine = new Minecraft();
+/*
+mine.Emitter.on("playerJoined",(e:{name:string,preventDefault:()=>void})=>{
+    mine.cmd("op "+e.name).then((out:string)=>{console.log(Colors.Fgra+out+Colors.R);})
 });
-mine.Emitter.on("serverStart", function () {
-    myClient.listen();
+mine.Emitter.on("playerLeft",(e:{name:string,preventDefault:()=>void})=>{
+    mine.cmd("deop "+e.name).then((out:string)=>{console.log(Colors.Fgra+out+Colors.R);})
 });
-mine.Emitter.on("playerJoined", function (user) {
-    mine.cmd("op " + user).then(function (out) { console.log(Colors.Fgra + out + Colors.R); });
-});
-mine.Emitter.on("playerLeft", function (user) {
-    mine.cmd("deop " + user).then(function (out) { console.log(Colors.Fgra + out + Colors.R); });
-});
-var display;
-mine.Emitter.on("playerChat", function (user, chat) { return __awaiter(void 0, void 0, void 0, function () {
-    var out, data, nbt, pos;
-    return __generator(this, function (_a) {
-        switch (_a.label) {
+*/
+mine.Emitter.on("playerChat", function (e) { return __awaiter(void 0, void 0, void 0, function () {
+    var _a, _b, _c;
+    return __generator(this, function (_d) {
+        switch (_d.label) {
             case 0:
-                if (!(chat == "summon")) return [3 /*break*/, 2];
-                return [4 /*yield*/, mine.cmd("data get entity " + user)];
+                if (!(e.chat == "stop")) return [3 /*break*/, 2];
+                e.preventDefault();
+                _b = (_a = console).log;
+                _c = Colors.Fgra;
+                return [4 /*yield*/, mine.cmd("stop")];
             case 1:
-                out = _a.sent();
-                if (out.match(/\S+ has the following entity data: /g) != null) {
-                    data = "" + out.match(/(?<=\S+ has the following entity data: ).+/g);
-                    nbt = mine.parseNbt(data);
-                    mine.playerData[user].nbt = nbt;
-                    mine.playerData[user].pos = nbt.Pos;
-                    pos = [Math.round(nbt.Pos[0]), Math.round(nbt.Pos[1]), Math.round(nbt.Pos[2])];
-                    display = mine.summonBlockDisplay(pos, "minecraft:diamond_block", null, { translation: [-0.5, 0, -0.5], left_rotation: [0, 0, 0, 1], scale: [1, 1, 1], right_rotation: [0, 0, 0, 1] }, []);
-                    display.build();
-                    console.log("summoned!!");
-                }
-                return [3 /*break*/, 3];
-            case 2:
-                if (chat == "up") {
-                    if (display != null) {
-                        display.pos[1] += 1;
-                        display.update().then(function (out) { console.log(Colors.Fgra + out + Colors.R); });
-                    }
-                }
-                else if (chat == "down") {
-                    if (display != null) {
-                        display.pos[1] -= 1;
-                        display.update().then(function (out) { console.log(Colors.Fgra + out + Colors.R); });
-                    }
-                }
-                else if (chat == "kill") {
-                    if (display != null)
-                        display.kill();
-                }
-                _a.label = 3;
-            case 3: return [2 /*return*/];
+                _b.apply(_a, [_c + (_d.sent()) + Colors.R]);
+                return [2 /*return*/];
+            case 2: return [2 /*return*/];
         }
     });
 }); });
-mine.Emitter.on("playerCmdOut", function (user, playerOut) { return __awaiter(void 0, void 0, void 0, function () {
-    var out;
+mine.Emitter.on("playerCmdOut", function (e) { return __awaiter(void 0, void 0, void 0, function () {
+    var returnVal;
     return __generator(this, function (_a) {
         switch (_a.label) {
             case 0:
-                if (!(playerOut == "Gamerule sendCommandFeedback is now set to: false")) return [3 /*break*/, 3];
+                if (!(e.out == "Gamerule sendCommandFeedback is now set to: false")) return [3 /*break*/, 3];
                 return [4 /*yield*/, mine.cmd("gamerule sendCommandFeedback true")];
             case 1:
-                out = _a.sent();
-                console.log(Colors.Fgra + out + Colors.R);
-                return [4 /*yield*/, mine.cmd("kill " + user)];
+                returnVal = _a.sent();
+                console.log(Colors.Fgra + returnVal + Colors.R);
+                return [4 /*yield*/, mine.cmd("kill " + e.name)];
             case 2:
-                out = _a.sent();
-                console.log(Colors.Fgra + out + Colors.R);
+                returnVal = _a.sent();
+                console.log(Colors.Fgra + returnVal + Colors.R);
                 _a.label = 3;
             case 3: return [2 /*return*/];
         }
     });
 }); });
+//#region door
+var door = undefined;
+var doorOpened = false;
+mine.Emitter.on("serverStart", function (e) {
+    var lst = [
+        BlockDisplay.fromFile(mine, "Door/1"),
+        BlockDisplay.fromFile(mine, "Door/2"),
+        BlockDisplay.fromFile(mine, "Door/3"),
+        BlockDisplay.fromFile(mine, "Door/4"),
+        Interaction.fromFile(mine, "Door/int0"),
+        Interaction.fromFile(mine, "Door/int1")
+    ];
+    if (lst[0] == null || lst[1] == null || lst[2] == null || lst[3] == null || lst[4] == null || lst[5] == null)
+        return;
+    door = [lst[0], lst[1], lst[2], lst[3], lst[4], lst[5]];
+    for (var i = 4; i < door.length; i++) {
+        var inter = door[i];
+        inter.start();
+        inter.onInteraction = doorToggle;
+        //inter.onAttack=doorKill;
+    }
+});
+function SaveDoor() {
+    if (door == null)
+        return;
+    if (!fs.existsSync(__dirname + "/Saves/Door"))
+        fs.mkdirSync(__dirname + "/Saves/Door");
+    door[0].savetoFile("Door/1");
+    door[1].savetoFile("Door/2");
+    door[2].savetoFile("Door/3");
+    door[3].savetoFile("Door/4");
+    door[4].savetoFile("Door/int0");
+    door[5].savetoFile("Door/int1");
+}
+function buildDoor() {
+    if (door == null)
+        return;
+    for (var i = 0; i < door.length; i++) {
+        door[i].build();
+    }
+    for (var i = 4; i < door.length; i++) {
+        var inter = door[i];
+        inter.start();
+        inter.onInteraction = doorToggle;
+        //inter.onAttack=doorKill;
+    }
+    var cmd = "fill " + door[0].Pos.join(" ") + " " + door[3].Pos.join(" ") + " barrier";
+    mine.cmd(cmd);
+}
+function animateDoor() {
+    if (door == null)
+        return;
+    door[0].animate(10);
+    door[1].animate(10);
+    door[2].animate(10);
+    door[3].animate(10);
+}
+function doorOpen() {
+    if (door == null)
+        return;
+    doorOpened = true;
+    //door1
+    door[0].transformation.left_rotation = [0, Math.sqrt(0.5), 0, Math.sqrt(0.5)];
+    door[0].transformation.translation = [0.188, 0, 1];
+    door[1].transformation.left_rotation = [0, Math.sqrt(0.5), 0, Math.sqrt(0.5)];
+    door[1].transformation.translation = [0.188, 0, 1];
+    //door2
+    door[2].transformation.left_rotation = [0, -Math.sqrt(0.5), 0, Math.sqrt(0.5)];
+    door[2].transformation.translation = [0.813, 0, 1];
+    door[3].transformation.left_rotation = [0, -Math.sqrt(0.5), 0, Math.sqrt(0.5)];
+    door[3].transformation.translation = [0.813, 0, 1];
+    animateDoor();
+    SaveDoor();
+    var cmd = "fill " + door[0].Pos.join(" ") + " " + door[3].Pos.join(" ") + " air";
+    mine.cmd(cmd);
+}
+function doorClose() {
+    if (door == null)
+        return;
+    doorOpened = false;
+    //door1
+    door[0].transformation.left_rotation = [0, 0, 0, 1];
+    door[0].transformation.translation = [0, 0, 1];
+    door[1].transformation.left_rotation = [0, 0, 0, 1];
+    door[1].transformation.translation = [0, 0, 1];
+    //door2
+    door[2].transformation.left_rotation = [0, 0, 0, 1];
+    door[2].transformation.translation = [1, 0, 1];
+    door[3].transformation.left_rotation = [0, 0, 0, 1];
+    door[3].transformation.translation = [1, 0, 1];
+    animateDoor();
+    SaveDoor();
+    var cmd = "fill " + door[0].Pos.join(" ") + " " + door[3].Pos.join(" ") + " barrier";
+    mine.cmd(cmd);
+}
+function doorKill() {
+    if (door == null)
+        return;
+    for (var i = 0; i < door.length; i++) {
+        door[i].kill();
+    }
+    fs.rmSync(__dirname + "/Saves/Door/1.json");
+    fs.rmSync(__dirname + "/Saves/Door/2.json");
+    fs.rmSync(__dirname + "/Saves/Door/3.json");
+    fs.rmSync(__dirname + "/Saves/Door/4.json");
+    fs.rmSync(__dirname + "/Saves/Door/int0.json");
+    fs.rmSync(__dirname + "/Saves/Door/int1.json");
+    fs.rmdirSync(__dirname + "/Saves/Door");
+    var cmd = "fill " + door[0].Pos.join(" ") + " " + door[3].Pos.join(" ") + " air";
+    mine.cmd(cmd);
+}
+function doorToggle() { if (doorOpened)
+    doorClose();
+else
+    doorOpen(); }
+mine.Emitter.on("playerChat", function (e) { return __awaiter(void 0, void 0, void 0, function () {
+    var playerPos;
+    return __generator(this, function (_a) {
+        switch (_a.label) {
+            case 0:
+                if (!(e.chat == "summonDoor")) return [3 /*break*/, 2];
+                e.preventDefault();
+                return [4 /*yield*/, mine.playerData[e.name].updatePos()];
+            case 1:
+                playerPos = (_a.sent());
+                door = [
+                    mine.summonBlockDisplay([playerPos[0], playerPos[1], playerPos[2]], ["Door"], null, "minecraft:dark_oak_door", { facing: "east", half: "lower", hinge: "left", open: "false" }, __assign(__assign({}, EmptyTransformationObj), { translation: [0, 0, 1], right_rotation: [0, Math.sqrt(0.5), 0, Math.sqrt(0.5)] })),
+                    mine.summonBlockDisplay([playerPos[0], playerPos[1] + 1, playerPos[2]], ["Door"], null, "minecraft:dark_oak_door", { facing: "east", half: "upper", hinge: "left", open: "false" }, __assign(__assign({}, EmptyTransformationObj), { translation: [0, 0, 1], right_rotation: [0, Math.sqrt(0.5), 0, Math.sqrt(0.5)] })),
+                    mine.summonBlockDisplay([playerPos[0] + 1, playerPos[1], playerPos[2]], ["Door"], null, "minecraft:dark_oak_door", { facing: "south", half: "lower", hinge: "right", open: "false" }, __assign(__assign({}, EmptyTransformationObj), { translation: [1, 0, 1], right_rotation: [0, 1, 0, 0] })),
+                    mine.summonBlockDisplay([playerPos[0] + 1, playerPos[1] + 1, playerPos[2]], ["Door"], null, "minecraft:dark_oak_door", { facing: "south", half: "upper", hinge: "right", open: "false" }, __assign(__assign({}, EmptyTransformationObj), { translation: [1, 0, 1], right_rotation: [0, 1, 0, 0] })),
+                    mine.summonInteraction([playerPos[0] + 0.5, playerPos[1], playerPos[2] + 0.5005], ["Door"], null, 1.01, 2, true),
+                    mine.summonInteraction([playerPos[0] + 1.5, playerPos[1], playerPos[2] + 0.5005], ["Door"], null, 1.01, 2, true)
+                ];
+                buildDoor();
+                SaveDoor();
+                return [3 /*break*/, 3];
+            case 2:
+                if (e.chat == "open" && door != null) {
+                    e.preventDefault();
+                    if (!doorOpened)
+                        doorOpen();
+                }
+                else if (e.chat == "close" && door != null) {
+                    e.preventDefault();
+                    if (doorOpened)
+                        doorClose();
+                }
+                else if (e.chat == "toggle" && door != null) {
+                    e.preventDefault();
+                    doorToggle();
+                }
+                else if (e.chat == "killDoor" && door != null) {
+                    e.preventDefault();
+                    doorKill();
+                }
+                _a.label = 3;
+            case 3: return [2 /*return*/];
+        }
+    });
+}); });
+//#endregion
+//#region BlockDisplays
+function relativePos(pos, relativePos) {
+    return __awaiter(this, void 0, void 0, function () {
+        var _this = this;
+        return __generator(this, function (_a) {
+            return [2 /*return*/, new Promise(function (resolve) { return __awaiter(_this, void 0, void 0, function () {
+                    var finalPos, i, num;
+                    return __generator(this, function (_a) {
+                        if (pos == null || (pos[0] == "~" && pos[1] == "~" && pos[2] == "~")) {
+                            resolve(relativePos);
+                            return [2 /*return*/];
+                        }
+                        finalPos = [0, 0, 0];
+                        for (i = 0; i < pos.length; i++) {
+                            num = pos[i];
+                            if (num == "~") {
+                                finalPos[i] = relativePos[i];
+                            }
+                            else if (num.startsWith("~")) {
+                                finalPos[i] = relativePos[i] + parseFloat(num.replace("~", ""));
+                            }
+                            else {
+                                finalPos[i] = parseFloat(num);
+                            }
+                        }
+                        resolve(finalPos);
+                        return [2 /*return*/];
+                    });
+                }); })];
+        });
+    });
+}
+var displays;
+var displayIndex;
+function saveDisplays() {
+    fs.writeFileSync(__dirname + "/Saves/Displays.json", JSON.stringify({ "index": displayIndex, "displays": displays.map(function (el) { return el.toJson(); }) }));
+}
+mine.Emitter.on("serverStart", function (e) {
+    try {
+        var data = JSON.parse(fs.readFileSync(__dirname + "/Saves/Displays.json").toString());
+        displays = data.displays.map(function (el) { return BlockDisplay.fromJson(mine, el); });
+        displayIndex = data.index;
+    }
+    catch (error) {
+        displays = [];
+        displayIndex = -1;
+    }
+});
+mine.Emitter.on("playerChat", function (e) { return __awaiter(void 0, void 0, void 0, function () {
+    var finalPos, display, display, pos, playerPos, finalPos, display, display, display, display, pos, _a, pos, playerPos, finalPos;
+    return __generator(this, function (_b) {
+        switch (_b.label) {
+            case 0:
+                if (!(e.chat == "summon")) return [3 /*break*/, 2];
+                e.preventDefault();
+                return [4 /*yield*/, mine.playerData[e.name].updatePos()];
+            case 1:
+                finalPos = (_b.sent());
+                if (displays.length != 0 && displayIndex != -1) {
+                    display = displays[displayIndex];
+                    display.glowing = false;
+                    display.update();
+                }
+                displays.push(mine.summonBlockDisplay(finalPos, null, null, "minecraft:diamond_block", null, EmptyTransformationObj, true));
+                display = displays[displays.length - 1];
+                display.addTags("Tests").build();
+                displayIndex = displays.length - 1;
+                saveDisplays();
+                return [2 /*return*/];
+            case 2:
+                if (!e.chat.match(/^summon (((-|\+)?\d+(\.\d+)?)|~|(~((-|\+)?\d+(\.\d+)?))) (((-|\+)?\d+(\.\d+)?)|~|(~((-|\+)?\d+(\.\d+)?))) (((-|\+)?\d+(\.\d+)?)|~|(~((-|\+)?\d+(\.\d+)?)))$/g)) return [3 /*break*/, 5];
+                e.preventDefault();
+                pos = e.chat.replace("summon ", "").split(" ");
+                return [4 /*yield*/, mine.playerData[e.name].updatePos()];
+            case 3:
+                playerPos = (_b.sent());
+                return [4 /*yield*/, relativePos(pos, playerPos)];
+            case 4:
+                finalPos = _b.sent();
+                if (displays.length != 0) {
+                    display = displays[displayIndex];
+                    display.glowing = false;
+                    display.update();
+                }
+                displays.push(mine.summonBlockDisplay(finalPos, null, null, "minecraft:diamond_block", null, EmptyTransformationObj, true));
+                display = displays[displays.length - 1];
+                display.addTags("Tests").build();
+                displayIndex = displays.length - 1;
+                saveDisplays();
+                return [2 /*return*/];
+            case 5:
+                if (!(e.chat == "kill-all")) return [3 /*break*/, 6];
+                e.preventDefault();
+                mine.cmd("kill @e[nbt={Tags:[\"FromServer\",\"Displays\",\"Tests\"]}]").then(function (out) { });
+                displays = [];
+                displayIndex = -1;
+                saveDisplays();
+                return [2 /*return*/];
+            case 6:
+                if (!(e.chat == "kill" || e.chat == "rotate" || e.chat == "un-rotate" || e.chat == "next" || e.chat.startsWith("move ") || e.chat.startsWith("tp "))) return [3 /*break*/, 15];
+                if (displayIndex == -1)
+                    return [2 /*return*/];
+                display = displays[displayIndex];
+                if (display == null)
+                    return [2 /*return*/];
+                e.preventDefault();
+                if (!(e.chat == "kill")) return [3 /*break*/, 7];
+                display.kill();
+                delete displays[displayIndex];
+                displays = displays.filter(function (el) { return el != null; });
+                if (displays.length > 0) {
+                    display = displays[displays.length - 1];
+                    display.glowing = true;
+                    display.update();
+                    displayIndex = displays.length - 1;
+                }
+                else
+                    displayIndex = -1;
+                saveDisplays();
+                return [2 /*return*/];
+            case 7:
+                if (!(e.chat == "rotate")) return [3 /*break*/, 8];
+                display.transformation.left_rotation = [0, 0.383, 0, 0.924];
+                display.animate(20);
+                saveDisplays();
+                return [2 /*return*/];
+            case 8:
+                if (!(e.chat == "un-rotate")) return [3 /*break*/, 9];
+                display.transformation.left_rotation = [0, 0, 0, 1];
+                display.animate(20);
+                saveDisplays();
+                return [2 /*return*/];
+            case 9:
+                if (!(e.chat == "next")) return [3 /*break*/, 10];
+                display = displays[displayIndex];
+                display.glowing = false;
+                display.update();
+                //set selected
+                displayIndex++;
+                displayIndex %= displays.length;
+                display = displays[displayIndex];
+                display.glowing = true;
+                display.update();
+                saveDisplays();
+                return [2 /*return*/];
+            case 10:
+                if (!e.chat.match(/^move (((-|\+)?\d+(\.\d+)?)|~|(~((-|\+)?\d+(\.\d+)?))) (((-|\+)?\d+(\.\d+)?)|~|(~((-|\+)?\d+(\.\d+)?))) (((-|\+)?\d+(\.\d+)?)|~|(~((-|\+)?\d+(\.\d+)?)))$/g)) return [3 /*break*/, 12];
+                pos = e.chat.replace("move ", "").split(" ");
+                _a = display;
+                return [4 /*yield*/, relativePos(pos, display.Pos)];
+            case 11:
+                _a.Pos = _b.sent();
+                display.update().then(function (out) { });
+                saveDisplays();
+                return [2 /*return*/];
+            case 12:
+                if (!e.chat.match(/^tp (((-|\+)?\d+(\.\d+)?)|~|(~((-|\+)?\d+(\.\d+)?))) (((-|\+)?\d+(\.\d+)?)|~|(~((-|\+)?\d+(\.\d+)?))) (((-|\+)?\d+(\.\d+)?)|~|(~((-|\+)?\d+(\.\d+)?)))$/g)) return [3 /*break*/, 15];
+                pos = e.chat.replace("tp ", "").split(" ");
+                return [4 /*yield*/, mine.playerData[e.name].updatePos()];
+            case 13:
+                playerPos = (_b.sent());
+                return [4 /*yield*/, relativePos(pos, playerPos)];
+            case 14:
+                finalPos = _b.sent();
+                display.Pos = finalPos;
+                display.update().then(function (out) { });
+                saveDisplays();
+                return [2 /*return*/];
+            case 15: return [2 /*return*/];
+        }
+    });
+}); });
+//#endregion

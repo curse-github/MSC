@@ -324,14 +324,15 @@ class Minecraft {
 
     static parseNbt(nbt:string):any {
         frontTrim();
-        var out:any = {};
         function parseValue() {
             if (nbt[0] == "{") {//object
                 return parseObj();
             } else if (nbt[0] == "[") {//array
                 return parseArray();
+            } else if (nbt[0] == "'") {//string
+                return parseStringSingle();
             } else if (nbt[0] == "\"") {//string
-                return parseString();
+                return parseStringDouble();
             } else if (nbt[0]=="-"||digits.includes(nbt[0])) {//number
                 return parseNumber();
             } else {//boolean
@@ -384,12 +385,12 @@ class Minecraft {
             //console.log("\""+ary+"\"");
             return ary;
         }
-        function parseString():string|null {
-            if (!nbt.startsWith("\"") && !nbt.startsWith("'")) {console.log("8");console.log(nbt);return null;}
+        function parseStringSingle():string|null {
+            if (!nbt.startsWith("'")) {console.log("8");console.log(nbt);return null;}
             nbt=nbt.substring(1);
             var ind:number = -1;
             for (let i = 0; i < nbt.length; i++) {
-                if ((nbt[i]=="\""||nbt[i]=="'")&&nbt[i-1]!="\\"){ind=i;break;}
+                if (nbt[i]=="'"&&nbt[i-1]!="\\"){ind=i;break;}
             }
             if (ind==-1){console.log("9");console.log(nbt);return null;}
             var str=nbt.substring(0,ind)
@@ -397,14 +398,27 @@ class Minecraft {
             //console.log("\""+str+"\"");
             return str;
         }
+        function parseStringDouble():string|null {
+            if (!nbt.startsWith("\"")) {console.log("10");console.log(nbt);return null;}
+            nbt=nbt.substring(1);
+            var ind:number = -1;
+            for (let i = 0; i < nbt.length; i++) {
+                if (nbt[i]=="\""&&nbt[i-1]!="\\"){ind=i;break;}
+            }
+            if (ind==-1){console.log("11");console.log(nbt);return null;}
+            var str=nbt.substring(0,ind)
+            nbt=nbt.substring(ind+1);
+            //console.log("\""+str+"\"");
+            return str;
+        }
         function parseNumber():number|null {
-            var num:string[]|null = nbt.match(/^-?\d+(\.\d+)?(s|S|b|B|d|D|f|F)?/g);
+            var num:string[]|null = nbt.match(/^-?\d+(\.\d+)?(s|S|b|B|d|D|f|F|L)?/g);
             if (num != null) {
                 nbt=nbt.substring(num[0].length);
                 //console.log("\""+num[0]+"\"");
                 return parseFloat(num[0]);
             }
-            else {console.log("10");console.log(nbt);return null;}
+            else {console.log("12");console.log(nbt);return null;}
         }
         function parseBool():boolean|null {
             if (nbt.toLowerCase().startsWith("true" )) {
@@ -415,7 +429,7 @@ class Minecraft {
                 //console.log("\""+false+"\"");
                 nbt=nbt.substring(5); return false;
             }
-            else {console.log("11");console.log(nbt);return null;}
+            else {console.log("13");console.log(nbt);return null;}
         }
         return parseValue();
     }
@@ -454,6 +468,8 @@ abstract class Entity {
     nbt:{[key:string]:string|string[];}={};
     addTags(...tags:string[]):Entity{(this.nbt.Tags as string[]).push(...(tags.map((el:string)=>"\""+el+"\"")));return this;}
 
+    selector:string;
+
     private position:Vec3<number> = [0,0,0];
     set Pos(value:Vec3<number>){ this.position=value;this.nbt.Pos=value.map((el:number)=>el.toString()+"d"); };
     get Pos():Vec3<number>{ return this.position; };
@@ -467,6 +483,8 @@ abstract class Entity {
         else  { this.uuid=generateUUID(); }
         if (!this.nbt.Tags.includes("\""+this.uuid+"\"")) this.addTags(this.uuid);
         if (!this.nbt.Tags.includes("\"FromServer")) this.addTags("FromServer");
+        this.selector="@e[nbt={Tags:[\""+this.uuid+"\",\"FromServer\"]},limit=1]";
+
         this.Pos = Pos;
     }
     async build():Promise<boolean> {
@@ -478,7 +496,7 @@ abstract class Entity {
     }
     update():Promise<boolean> {
         return new Promise<boolean>((resolve:(value:boolean)=>void)=>{
-            var command:string = "data merge entity @e[nbt={Tags:[\""+this.uuid+"\",\"FromServer\"]},limit=1]";
+            var command:string = "data merge entity "+this.selector;
             var nbt:string = "{"+Object.entries(this.nbt).map(([key,value]:[string,string|string[]])=>{
                 if ((typeof value) == "object") return key+":["+(value as string[]).join(",")+"]";
                 else return key+":"+value;
@@ -489,7 +507,7 @@ abstract class Entity {
     }
     kill():Promise<boolean> {
         return new Promise<boolean>((resolve:(value:boolean)=>void)=>{
-            this.parent.cmd("kill @e[nbt={Tags:[\""+this.uuid+"\",\"FromServer\"]}]").then((out:string)=>{if (out.match(/Killed \d+/g) != null) resolve(true); else resolve(false);});
+            this.parent.cmd("kill "+this.selector).then((out:string)=>{if (out.match(/Killed \d+/g) != null) resolve(true); else resolve(false);});
         });
     }
     savetoFile(name:string) {
@@ -545,7 +563,7 @@ class BlockDisplay extends Entity {
     }
     animate(ticks:number):Promise<boolean> {
         return new Promise<boolean>((resolve:(value:boolean)=>void)=>{
-            this.command = "data merge entity @e[nbt={Tags:[\""+this.uuid+"\",\"FromServer\",\"Displays\"]},limit=1]";
+            this.command = "data merge entity "+this.selector;
             var nbt:string = "{";
             nbt+="start_interpolation:0,interpolation_duration:"+ticks;
             if (this.transformation!=null) nbt+=",transformation:"+Minecraft.transformationToString(this.transformation);
@@ -599,16 +617,6 @@ class Interaction extends Entity {
         this.height=height;
         this.response=response;
     }
-    start() {
-        this.intervalId = setInterval(() => {
-            this.parent.cmd("data get entity @e[nbt={Tags:[\""+this.uuid+"\",\"FromServer\",\"Interactions\"]},limit=1]").then((out:string)=>{
-                if(out!="No entity was found") {
-                    console.log(out);
-                }
-            })
-        }, 1000/20);//one tick
-    }
-    public onInteraction:((nbt:any)=>void)|undefined;
     build(): Promise<boolean> {
         this.start();
         return super.build();
@@ -617,6 +625,39 @@ class Interaction extends Entity {
         if (this.intervalId!=null) {clearInterval(this.intervalId); this.intervalId=undefined;}
         return super.kill();
     }
+
+    public onInteraction:((nbt:any)=>void)|undefined;
+    public onAttack     :((nbt:any)=>void)|undefined;
+    private ignoreNextInteraction:boolean=false;
+    private ignoreNextAttack     :boolean=false;
+    start() {
+        this.intervalId = setInterval(() => {
+            this.parent.cmd("data get entity "+this.selector).then((out:string)=>{
+                if(out!="No entity was found") {
+                    var match:RegExpMatchArray|null = out.match(/^\S+ has the following entity data: {.*}$/g);
+                    if (match!=null) {
+                        var nbt:any = Minecraft.parseNbt(out.match(/(?<=^\S+ has the following entity data: ){.*}$/g)![0]);
+                        if (nbt.interaction != null) {
+                            if (this.ignoreNextInteraction){this.ignoreNextInteraction=false;return;}//buffers one detection to reset
+                            else {this.ignoreNextInteraction=true;}
+                            //console.log(Colors.Fgra+"Interact: "+Colors.Fgre+this.uuid+Colors.R)
+                            //console.log(nbt.interaction);
+                            this.parent.cmd("data remove entity "+this.selector+" interaction");
+                            if (this.onInteraction!=null) this.onInteraction(nbt);
+                        } else if (nbt.attack != null) {
+                            if (this.ignoreNextAttack){this.ignoreNextAttack=false;return;}//buffers one detection to reset
+                            else {this.ignoreNextAttack=true;}
+                            //console.log(Colors.Fgra+"Attack: "+Colors.Fgre+this.uuid+Colors.R)
+                            //console.log(nbt.attack);
+                            this.parent.cmd("data remove entity "+this.selector+" attack");
+                            if (this.onAttack!=null) this.onAttack(nbt);
+                        }
+                    }
+                }
+            })
+        }, 1000/20);//one tick
+    }
+
     static fromJson(parent:Minecraft,json:{"uuid":string,"nbt":{[key:string]:string|string[]}}):Interaction {
         return new Interaction(parent,((json.nbt.Pos as string[]).map((el:string):number=>parseFloat(el)) as Vec3<number>),(json.nbt.Tags as string[]).map((el:string)=>((el.match(/(?<=").*(?=")/g)||[""])[0])),json.uuid,parseFloat(json.nbt.width as string),parseFloat(json.nbt.height as string),json.nbt.response=="true");
     }
@@ -632,14 +673,14 @@ class Interaction extends Entity {
 
 const mine:Minecraft = new Minecraft();
 
-//*
+/*
 mine.Emitter.on("playerJoined",(e:{name:string,preventDefault:()=>void})=>{
     mine.cmd("op "+e.name).then((out:string)=>{console.log(Colors.Fgra+out+Colors.R);})
 });
 mine.Emitter.on("playerLeft",(e:{name:string,preventDefault:()=>void})=>{
     mine.cmd("deop "+e.name).then((out:string)=>{console.log(Colors.Fgra+out+Colors.R);})
 });
-//*/
+*/
 mine.Emitter.on("playerChat",async(e:{name:string,chat:string,player:PlayerData,preventDefault:()=>void})=>{
     if (e.chat=="stop") { e.preventDefault();
         console.log(Colors.Fgra+(await mine.cmd("stop"))+Colors.R);
@@ -655,52 +696,57 @@ mine.Emitter.on("playerCmdOut",async (e:{name:string,out:string,player:PlayerDat
 });
 
 //#region door
-var door:[BlockDisplay,BlockDisplay,BlockDisplay,BlockDisplay,Interaction]|undefined = undefined;
+var door:[BlockDisplay,BlockDisplay,BlockDisplay,BlockDisplay,Interaction,Interaction]|undefined = undefined;
 var doorOpened:boolean = false;
 mine.Emitter.on("serverStart",(e:{preventDefault:()=>void})=>{
     const lst:[
         BlockDisplay|undefined,BlockDisplay|undefined,
         BlockDisplay|undefined,BlockDisplay|undefined,
-        Interaction|undefined,Interaction|undefined,
-        Interaction|undefined,Interaction|undefined,
-        Interaction|undefined,Interaction|undefined
+        Interaction|undefined, Interaction|undefined
     ] = [
         BlockDisplay.fromFile(mine,"Door/1"),
         BlockDisplay.fromFile(mine,"Door/2"),
         BlockDisplay.fromFile(mine,"Door/3"),
         BlockDisplay.fromFile(mine,"Door/4"),
         Interaction.fromFile(mine,"Door/int0"),
-        Interaction.fromFile(mine,"Door/int1"),
-        Interaction.fromFile(mine,"Door/int2"),
-        Interaction.fromFile(mine,"Door/int3"),
-        Interaction.fromFile(mine,"Door/int4"),
-        Interaction.fromFile(mine,"Door/int5")
+        Interaction.fromFile(mine,"Door/int1")
     ]
-
-    if (lst[0]==null||lst[1]==null||lst[2]==null||lst[3]==null||lst[4]==null||lst[5]==null||lst[6]==null||lst[7]==null||lst[8]==null||lst[9]==null) return;
-    door = [ lst[0],lst[1],lst[2],lst[3],lst[4]];//,lst[5],lst[6],lst[7],lst[8],lst[9] ];
+    if (lst[0]==null||lst[1]==null||lst[2]==null||lst[3]==null||lst[4]==null||lst[5]==null) return;
+    door = [ lst[0],lst[1],lst[2],lst[3],lst[4],lst[5] ];
+    for (let i = 4; i < door.length; i++) {
+        var inter:Interaction=(door[i]as Interaction);
+        inter.start();
+        inter.onInteraction=doorToggle;
+        //inter.onAttack=doorKill;
+    }
 });
 function SaveDoor() {
-    if (door==null)return;
+    if (door==null) return;
     if (!fs.existsSync(__dirname+"/Saves/Door")) fs.mkdirSync(__dirname+"/Saves/Door");
     door[0].savetoFile("Door/1"); door[1].savetoFile("Door/2");
     door[2].savetoFile("Door/3"); door[3].savetoFile("Door/4");
-    door[4].savetoFile("Door/int0"); //door[5].savetoFile("Door/int1");
-    //door[6].savetoFile("Door/int2"); door[7].savetoFile("Door/int3");
-    //door[8].savetoFile("Door/int4"); door[9].savetoFile("Door/int5");
+    door[4].savetoFile("Door/int0"); door[5].savetoFile("Door/int1");
 }
 function buildDoor() {
     if (door==null) return;
     for (let i = 0; i < door.length; i++) { door[i].build(); }
-    for (let i = 4; i < door.length; i++) { (door[i] as Interaction).onInteraction=doorInteract; }
+    for (let i = 4; i < door.length; i++) {
+        var inter:Interaction=(door[i]as Interaction);
+        inter.start();
+        inter.onInteraction=doorToggle;
+        //inter.onAttack=doorKill;
+    }
+    var cmd:string = "fill "+door[0].Pos.join(" ")+" "+door[3].Pos.join(" ")+" barrier";
+    mine.cmd(cmd);
 }
 function animateDoor() {
-    if (door==null)return;
+    if (door==null) return;
     door[0].animate(10); door[1].animate(10);
     door[2].animate(10); door[3].animate(10);
 }
 function doorOpen() {
-    if (door==null)return;
+    if (door==null) return;
+    doorOpened=true;
     //door1
     (door[0].transformation as transformationObj).left_rotation = [0,Math.sqrt(0.5),0,Math.sqrt(0.5)];
     (door[0].transformation as transformationObj).translation   = [0.188,0,1];
@@ -713,12 +759,12 @@ function doorOpen() {
     (door[3].transformation as transformationObj).translation   = [0.813,0,1];
     animateDoor();
     SaveDoor();
-
     var cmd:string = "fill "+door[0].Pos.join(" ")+" "+door[3].Pos.join(" ")+" air";
     mine.cmd(cmd);
 }
 function doorClose() {
-    if (door==null)return;
+    if (door==null) return;
+    doorOpened=false;
     //door1
     (door[0].transformation as transformationObj).left_rotation = [0,0,0,1];
     (door[0].transformation as transformationObj).translation   = [0,0,1];
@@ -731,42 +777,37 @@ function doorClose() {
     (door[3].transformation as transformationObj).translation   = [1,0,1];
     animateDoor();
     SaveDoor();
-    
     var cmd:string = "fill "+door[0].Pos.join(" ")+" "+door[3].Pos.join(" ")+" barrier";
     mine.cmd(cmd);
 }
-function doorToggle() {
-    if (doorOpened) doorClose();
-    else doorOpen();
+function doorKill() {
+    if (door==null) return;
+    for (let i = 0; i < door.length; i++) { door[i].kill(); }
+        fs.rmSync(__dirname+"/Saves/Door/1.json"); fs.rmSync(__dirname+"/Saves/Door/2.json");
+        fs.rmSync(__dirname+"/Saves/Door/3.json"); fs.rmSync(__dirname+"/Saves/Door/4.json");
+        fs.rmSync(__dirname+"/Saves/Door/int0.json"); fs.rmSync(__dirname+"/Saves/Door/int1.json");
+        fs.rmdirSync(__dirname+"/Saves/Door");
+    var cmd:string = "fill "+door[0].Pos.join(" ")+" "+door[3].Pos.join(" ")+" air";
+    mine.cmd(cmd);
 }
-function doorInteract(nbt:any) {
-    //console.log(nbt);
-    doorToggle()
-}
+function doorToggle() { if (doorOpened) doorClose(); else doorOpen(); }
 mine.Emitter.on("playerChat",async(e:{name:string,chat:string,player:PlayerData,preventDefault:()=>void})=>{
     if (e.chat=="summonDoor") { e.preventDefault();
         var playerPos:Vec3<number> = (await mine.playerData[e.name].updatePos()) as Vec3<number>;
         door = [
-            mine.summonBlockDisplay([playerPos[0]      ,playerPos[1]  ,playerPos[2]],["Door"],null,"minecraft:dark_oak_door",{facing:"east",  half:"lower", hinge:"left",  open:"false"},{...EmptyTransformationObj,translation:[0,0,1],right_rotation:[0,Math.sqrt(0.5),0,Math.sqrt(0.5)]}),
-            mine.summonBlockDisplay([playerPos[0]      ,playerPos[1]+1,playerPos[2]],["Door"],null,"minecraft:dark_oak_door",{facing:"east",  half:"upper", hinge:"left",  open:"false"},{...EmptyTransformationObj,translation:[0,0,1],right_rotation:[0,Math.sqrt(0.5),0,Math.sqrt(0.5)]}),
-            mine.summonBlockDisplay([playerPos[0]+1    ,playerPos[1]  ,playerPos[2]],["Door"],null,"minecraft:dark_oak_door",{facing:"south", half:"lower", hinge:"right", open:"false"},{...EmptyTransformationObj,translation:[1,0,1],right_rotation:[0,1,0,0]}),
-            mine.summonBlockDisplay([playerPos[0]+1    ,playerPos[1]+1,playerPos[2]],["Door"],null,"minecraft:dark_oak_door",{facing:"south", half:"upper", hinge:"right", open:"false"},{...EmptyTransformationObj,translation:[1,0,1],right_rotation:[0,1,0,0]}),
-            mine.summonInteraction ([playerPos[0]+1    ,playerPos[1]  ,playerPos[2]],["Door"],null,2,2,true),
+            mine.summonBlockDisplay([playerPos[0]    ,playerPos[1]  ,playerPos[2]    ],["Door"],null,"minecraft:dark_oak_door",{facing:"east",  half:"lower", hinge:"left",  open:"false"},{...EmptyTransformationObj,translation:[0,0,1],right_rotation:[0,Math.sqrt(0.5),0,Math.sqrt(0.5)]}),
+            mine.summonBlockDisplay([playerPos[0]    ,playerPos[1]+1,playerPos[2]    ],["Door"],null,"minecraft:dark_oak_door",{facing:"east",  half:"upper", hinge:"left",  open:"false"},{...EmptyTransformationObj,translation:[0,0,1],right_rotation:[0,Math.sqrt(0.5),0,Math.sqrt(0.5)]}),
+            mine.summonBlockDisplay([playerPos[0]+1  ,playerPos[1]  ,playerPos[2]    ],["Door"],null,"minecraft:dark_oak_door",{facing:"south", half:"lower", hinge:"right", open:"false"},{...EmptyTransformationObj,translation:[1,0,1],right_rotation:[0,1,0,0]}),
+            mine.summonBlockDisplay([playerPos[0]+1  ,playerPos[1]+1,playerPos[2]    ],["Door"],null,"minecraft:dark_oak_door",{facing:"south", half:"upper", hinge:"right", open:"false"},{...EmptyTransformationObj,translation:[1,0,1],right_rotation:[0,1,0,0]}),
+            mine.summonInteraction ([playerPos[0]+0.5,playerPos[1]  ,playerPos[2]+0.5005],["Door"],null,1.01,2,true),
+            mine.summonInteraction ([playerPos[0]+1.5,playerPos[1]  ,playerPos[2]+0.5005],["Door"],null,1.01,2,true)
         ];
         buildDoor(); SaveDoor();
-    } else if (e.chat=="open" && door != null) { e.preventDefault();
-        if (!doorOpened) doorOpen();
-    } else if (e.chat=="close" && door != null) { e.preventDefault();
-        if (doorOpened) doorClose();
-    } else if (e.chat=="killDoor" && door != null) { e.preventDefault();
-        for (let i = 0; i < door.length; i++) { door[i].kill(); }
-        fs.rmSync(__dirname+"/Saves/Door/1.json"); fs.rmSync(__dirname+"/Saves/Door/2.json");
-        fs.rmSync(__dirname+"/Saves/Door/3.json"); fs.rmSync(__dirname+"/Saves/Door/4.json");
-        fs.rmSync(__dirname+"/Saves/Door/int0.json"); fs.rmSync(__dirname+"/Saves/Door/int1.json");
-        fs.rmSync(__dirname+"/Saves/Door/int2.json"); fs.rmSync(__dirname+"/Saves/Door/int3.json");
-        fs.rmSync(__dirname+"/Saves/Door/int4.json"); fs.rmSync(__dirname+"/Saves/Door/int5.json");
-        fs.rmdirSync(__dirname+"/Saves/Door");
     }
+    else if (e.chat=="open"     && door != null) { e.preventDefault(); if (!doorOpened) doorOpen(); }
+    else if (e.chat=="close"    && door != null) { e.preventDefault(); if (doorOpened)  doorClose();}
+    else if (e.chat=="toggle"   && door != null) { e.preventDefault(); doorToggle();}
+    else if (e.chat=="killDoor" && door != null) { e.preventDefault(); doorKill();  }
 });
 //#endregion
 
@@ -781,7 +822,7 @@ async function relativePos(pos:Vec3<string>|null,relativePos:Vec3<number>):Promi
             else if (num.startsWith("~")){finalPos[i]=relativePos[i]+parseFloat(num.replace("~","")); }
             else{finalPos[i]=parseFloat(num); }
         }
-        resolve(finalPos);return;
+        resolve(finalPos); return;
     });
 }
 
