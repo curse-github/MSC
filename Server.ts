@@ -466,8 +466,14 @@ class Minecraft {
             return str;
         }
     }
-    summonBlockDisplay(Pos:Vec3<number>, Tags:string[]|null, identifier:string|null, Name:string, Properties:{[key:string]:string}|null|undefined, transformation:Transformation|null,glowing?:boolean|null,glow_color_override?:number|null):BlockDisplay {
-        return new BlockDisplay(this,Pos,Tags,identifier,Name,Properties,transformation,glowing,glow_color_override);
+    summonBlockDisplay(Pos:Vec3<number>, Tags:string[]|null, identifier:string|null, transformation:Transformation|null, Name:string, Properties:{[key:string]:string}|null|undefined):BlockDisplay {
+        return new BlockDisplay(this,Pos,Tags,identifier,transformation,Name,Properties);
+    }
+    summonItemDisplay(Pos:Vec3<number>, Tags:string[]|null, identifier:string|null, transformation:Transformation|null):ItemDisplay {
+        return new ItemDisplay(this,Pos,Tags,identifier,transformation);
+    }
+    summonTextDisplay(Pos:Vec3<number>, Tags:string[]|null, identifier:string|null, transformation:Transformation|null):TextDisplay {
+        return new TextDisplay(this,Pos,Tags,identifier,transformation);
     }
     summonInteraction(Pos:Vec3<number>, Tags:string[]|null, identifier:string|null, width:number, height:number, response:boolean):Interaction {
         return new Interaction(this,Pos,Tags,identifier,width,height,response);
@@ -487,7 +493,7 @@ abstract class Entity {
     set Pos(value:Vec3<number>){ this.position=value;this.nbt.Pos=value.map((el:number)=>el.toString()+"d"); };
     get Pos():Vec3<number>{ return this.position; };
 
-    constructor(parent:Minecraft,entityName:string, Pos:Vec3<number>, Tags:string[]|null, identifier:string|null) {
+    constructor(parent:Minecraft, entityName:string, Pos:Vec3<number>, Tags:string[]|null, identifier:string|null) {
         this.parent=parent;
         this.entityName=entityName;
 
@@ -534,7 +540,37 @@ abstract class Entity {
         }
     }
 }
-class BlockDisplay extends Entity {
+//#region Displays
+abstract class Display extends Entity {
+
+    private actualTransformation:Transformation=EmptyTransformationObj;
+    set transformation(value:Transformation){ this.actualTransformation=value;this.nbt.transformation=Minecraft.transformationToString(value); };
+    get transformation():Transformation{ return this.actualTransformation; };
+
+    set glowing(value:boolean){ this.nbt.Glowing=value.toString(); };
+    get glowing():boolean{ return this.nbt.Glowing=="true"; };
+
+    private glowColorOverride:number = 16383998;// https://www.digminecraft.com/lists/dyed_armor_color_list_pc.php
+    set glow_color_override(value:number){ this.glowColorOverride=value;this.nbt.glow_color_override=value.toString(); };
+    get glow_color_override():number{ return this.glowColorOverride; };
+    constructor(parent:Minecraft, entityName:string, Pos:Vec3<number>, Tags:string[]|null, identifier:string|null, transformation:Transformation|null) {
+        super(parent,entityName,Pos,Tags,identifier);
+        this.addTags("Displays");
+        if (transformation) this.transformation=transformation;
+    }
+    animate(ticks:number):Promise<boolean> {
+        return new Promise<boolean>((resolve:(value:boolean)=>void)=>{
+            var command:string = "data merge entity "+this.selector;
+            var nbt:string = "{";
+            nbt+="start_interpolation:0,interpolation_duration:"+ticks;
+            if (this.transformation!=null) nbt+=",transformation:"+Minecraft.transformationToString(this.transformation);
+            nbt+="}";
+            command+=" "+nbt;
+            this.parent.cmd(command).then((out:string)=>{if (out.includes("Modified entity data of")) resolve(true); else resolve(false);});
+        });
+    }
+}
+class BlockDisplay extends Display {
     addTags(...tags:string[]):BlockDisplay{super.addTags(...tags);return this;}
 
     private blockState:{Name:string,Properties?:{[key:string]:string}};
@@ -549,41 +585,15 @@ class BlockDisplay extends Entity {
     set blockStateProperties(value:{[key:string]:string}|undefined){ this.blockState.Properties=value;this.setBlockState(); };
     get blockStateProperties():{[key:string]:string}|undefined{ return this.blockState.Properties; };
 
-    private actualTransformation:Transformation=EmptyTransformationObj;
-    set transformation(value:Transformation){ this.actualTransformation=value;this.nbt.transformation=Minecraft.transformationToString(value); };
-    get transformation():Transformation{ return this.actualTransformation; };
-
-    set glowing(value:boolean){ this.nbt.Glowing=value.toString(); };
-    get glowing():boolean{ return this.nbt.Glowing=="true"; };
-
-    private glowColorOverride:number = 16383998;// https://www.digminecraft.com/lists/dyed_armor_color_list_pc.php
-    set glow_color_override(value:number){ this.glowColorOverride=value;this.nbt.glow_color_override=value.toString(); };
-    get glow_color_override():number{ return this.glowColorOverride; };
-
-    command:string|undefined;
-    constructor(parent:Minecraft, Pos:Vec3<number>, Tags:string[]|null, identifier:string|null, Name:string, Properties:{[key:string]:string}|null|undefined, transformation:Transformation|null,glowing?:boolean|null,glow_color_override?:number|null) {
-        super(parent,"minecraft:block_display",Pos,Tags,identifier);
-        this.addTags("Displays","BlockDisplays");
+    constructor(parent:Minecraft, Pos:Vec3<number>, Tags:string[]|null, identifier:string|null, transformation:Transformation|null, Name:string, Properties:{[key:string]:string}|null|undefined) {
+        super(parent,"minecraft:block_display",Pos,Tags,identifier,transformation);
+        this.addTags("BlockDisplays");
         this.nbt.CustomName="\"\\\""+this.uuid+"\\\"\"";
         this.nbt.CustomNameVisible="0";
 
         this.blockState={Name:""};
         this.blockStateName=Name;
         if (Properties) this.blockStateProperties=Properties;
-        if (transformation) this.transformation=transformation;
-        if (glowing) this.glowing=glowing;
-        if (glow_color_override) this.glow_color_override=glow_color_override;
-    }
-    animate(ticks:number):Promise<boolean> {
-        return new Promise<boolean>((resolve:(value:boolean)=>void)=>{
-            this.command = "data merge entity "+this.selector;
-            var nbt:string = "{";
-            nbt+="start_interpolation:0,interpolation_duration:"+ticks;
-            if (this.transformation!=null) nbt+=",transformation:"+Minecraft.transformationToString(this.transformation);
-            nbt+="}";
-            this.command+=" "+nbt;
-            this.parent.cmd(this.command).then((out:string)=>{if (out.includes("Modified entity data of")) resolve(true); else resolve(false);});
-        });
     }
     static fromJson(parent:Minecraft,json:{"uuid":string,"nbt":{[key:string]:string|string[]}}):BlockDisplay {
         var blockState:{Name:string,Properties?:{[key:string]:string}} = Minecraft.parseNbt(json.nbt.block_state as string);
@@ -592,10 +602,8 @@ class BlockDisplay extends Entity {
             ((json.nbt.Pos as string[]).map((el:string):number=>parseFloat(el)) as Vec3<number>),
             (json.nbt.Tags as string[]).map((el:string)=>((el.match(/(?<=").*(?=")/g)||[""])[0])),
             json.uuid,
-            blockState.Name,blockState.Properties,
             transformation,
-            (json.nbt.glowing!=null)?(json.nbt.glowing=="true"):null,
-            (json.nbt.glow_color_override!=null)?parseInt(json.nbt.glow_color_override as string):null
+            blockState.Name,blockState.Properties
         );
         out.nbt=json.nbt;
         return out;
@@ -609,7 +617,67 @@ class BlockDisplay extends Entity {
         }
     }
 }
-//#region interaction
+class ItemDisplay extends Display {
+    addTags(...tags:string[]):ItemDisplay{super.addTags(...tags);return this;}
+
+    constructor(parent:Minecraft, Pos:Vec3<number>, Tags:string[]|null, identifier:string|null, transformation:Transformation|null) {
+        super(parent,"minecraft:item_display",Pos,Tags,identifier,transformation);
+        this.addTags("ItemDisplays");
+        this.nbt.CustomName="\"\\\""+this.uuid+"\\\"\"";
+        this.nbt.CustomNameVisible="0";
+    }
+    static fromJson(parent:Minecraft,json:{"uuid":string,"nbt":{[key:string]:string|string[]}}):ItemDisplay {
+        var transformation:Transformation|null = (json.nbt.transformation!=null)?(Minecraft.parseNbt(json.nbt.transformation as string) as Transformation):null;
+        var out:ItemDisplay = new ItemDisplay(parent,
+            ((json.nbt.Pos as string[]).map((el:string):number=>parseFloat(el)) as Vec3<number>),
+            (json.nbt.Tags as string[]).map((el:string)=>((el.match(/(?<=").*(?=")/g)||[""])[0])),
+            json.uuid,
+            transformation,
+        );
+        out.nbt=json.nbt;
+        return out;
+    }
+    static fromFile(parent:Minecraft,name:string):ItemDisplay|undefined {
+        try {
+            return ItemDisplay.fromJson(parent,JSON.parse(fs.readFileSync(__dirname+"/Saves/"+name+".json").toString()));
+        } catch (err:any) {
+            //console.log(err);
+            return undefined;
+        }
+    }
+}
+class TextDisplay extends Display {
+    addTags(...tags:string[]):TextDisplay{super.addTags(...tags);return this;}
+
+    constructor(parent:Minecraft, Pos:Vec3<number>, Tags:string[]|null, identifier:string|null, transformation:Transformation|null) {
+        super(parent,"minecraft:text_display",Pos,Tags,identifier,transformation);
+        this.addTags("TextDisplays");
+        this.nbt.CustomName="\"\\\""+this.uuid+"\\\"\"";
+        this.nbt.CustomNameVisible="0";
+    }
+    static fromJson(parent:Minecraft,json:{"uuid":string,"nbt":{[key:string]:string|string[]}}):TextDisplay {
+        var transformation:Transformation|null = (json.nbt.transformation!=null)?(Minecraft.parseNbt(json.nbt.transformation as string) as Transformation):null;
+        var out:TextDisplay = new TextDisplay(parent,
+            ((json.nbt.Pos as string[]).map((el:string):number=>parseFloat(el)) as Vec3<number>),
+            (json.nbt.Tags as string[]).map((el:string)=>((el.match(/(?<=").*(?=")/g)||[""])[0])),
+            json.uuid,
+            transformation,
+        );
+        out.nbt=json.nbt;
+        return out;
+    }
+    static fromFile(parent:Minecraft,name:string):TextDisplay|undefined {
+        try {
+            return TextDisplay.fromJson(parent,JSON.parse(fs.readFileSync(__dirname+"/Saves/"+name+".json").toString()));
+        } catch (err:any) {
+            //console.log(err);
+            return undefined;
+        }
+    }
+}
+//#endregion Displays
+
+//#region Interaction
 class Interaction extends Entity {
     addTags(...tags:string[]):Interaction{super.addTags(...tags);return this;}
 
@@ -630,16 +698,10 @@ class Interaction extends Entity {
         this.height=height;
         this.response=response;
     }
-    build(): Promise<boolean> {
-        return super.build();
-    }
-    kill(): Promise<boolean> {
-        return super.kill();
-    }
-
-
     static fromJson(parent:Minecraft,json:{"uuid":string,"nbt":{[key:string]:string|string[]}}):Interaction {
-        return new Interaction(parent,((json.nbt.Pos as string[]).map((el:string):number=>parseFloat(el)) as Vec3<number>),(json.nbt.Tags as string[]).map((el:string)=>((el.match(/(?<=").*(?=")/g)||[""])[0])),json.uuid,parseFloat(json.nbt.width as string),parseFloat(json.nbt.height as string),json.nbt.response=="true");
+        var out:Interaction = new Interaction(parent,((json.nbt.Pos as string[]).map((el:string):number=>parseFloat(el)) as Vec3<number>),(json.nbt.Tags as string[]).map((el:string)=>((el.match(/(?<=").*(?=")/g)||[""])[0])),json.uuid,parseFloat(json.nbt.width as string),parseFloat(json.nbt.height as string),json.nbt.response=="true");
+        out.nbt=json.nbt;
+        return out;
     }
     static fromFile(parent:Minecraft,name:string):Interaction|undefined {
         try {
@@ -699,7 +761,7 @@ function registerAttackDetecter(mine:Minecraft,Tags:string[],onAttack:(nbt:any)=
         })
     }, 1000/20);//one tick
 }
-//#endregion
+//#endregion Interaction
 
 const mine:Minecraft = new Minecraft();
 /*
@@ -723,8 +785,26 @@ mine.Emitter.on("playerCmdOut",async (e:{name:string,out:string,player:PlayerDat
     }
 });
 
-//#region door
-type doorArray = [BlockDisplay,BlockDisplay,
+
+
+var Quat90:Quat = AxAngToQuat([0,1,0],Math.PI/2);
+var QuatNeg90:Quat = AxAngToQuat([0,1,0],-Math.PI/2);
+var Quat180:Quat = AxAngToQuat([0,1,0],Math.PI);
+async function relativePos(pos:Vec3<string>|null,relativePos:Vec3<number>):Promise<Vec3<number>> {
+    return new Promise<Vec3<number>>(async(resolve:(value:Vec3<number>)=>void)=>{
+        if (pos==null || (pos[0]=="~"&&pos[1]=="~"&&pos[2]=="~")) { resolve(relativePos);return; }
+        var finalPos:Vec3<number> = [0,0,0];
+        for (let i = 0; i < pos.length; i++) {
+            const num = pos[i];
+            if (num=="~") { finalPos[i]=relativePos[i]; }
+            else if (num.startsWith("~")){finalPos[i]=relativePos[i]+parseFloat(num.replace("~","")); }
+            else{finalPos[i]=parseFloat(num); }
+        }
+        resolve(finalPos); return;
+    });
+}
+
+type doorType = [BlockDisplay,BlockDisplay,
     BlockDisplay,BlockDisplay,
     Interaction,Interaction,
     Interaction,Interaction,
@@ -734,160 +814,49 @@ type doorArray = [BlockDisplay,BlockDisplay,
     Interaction,Interaction,
     Interaction,Interaction
 ]
-var door:doorArray|undefined = undefined;
-var doorOpened:boolean = false;
-var animationSpeed:number=5;
-var Quat90:Quat =AxAngToQuat([0,1,0],Math.PI/2);
-var QuatNeg90:Quat =AxAngToQuat([0,1,0],-Math.PI/2);
-var Quat180:Quat =AxAngToQuat([0,1,0],Math.PI);
-mine.Emitter.on("serverStart",(e:{preventDefault:()=>void})=>{
-    const lst:[
-        BlockDisplay|undefined,BlockDisplay|undefined,
-        BlockDisplay|undefined,BlockDisplay|undefined,
-        Interaction?, Interaction?,
-        Interaction?, Interaction?,
-        Interaction?, Interaction?,
-        Interaction?, Interaction?,
-        Interaction?, Interaction?,
-        Interaction?, Interaction?,
-        Interaction?, Interaction?
-    ] = [
-        BlockDisplay.fromFile(mine,"Door/1"), BlockDisplay.fromFile(mine,"Door/2"),
-        BlockDisplay.fromFile(mine,"Door/3"), BlockDisplay.fromFile(mine,"Door/4")
-    ]
-    for (let i = 0; i < 14; i++) { lst[i+4]=Interaction.fromFile(mine,"Door/int"+i); }
-    if (
-        lst[ 0]==null||lst[ 1]==null||
-        lst[ 2]==null||lst[ 3]==null||
-        lst[ 4]==null||lst[ 5]==null||
-        lst[ 6]==null||lst[ 7]==null||
-        lst[ 8]==null||lst[ 9]==null||
-        lst[10]==null||lst[11]==null||
-        lst[12]==null||lst[13]==null||
-        lst[14]==null||lst[15]==null||
-        lst[16]==null||lst[17]==null
+class Door {
+    constructor(){}
+
+    static door:doorType|undefined = undefined;
+    static doorOpened:boolean = false;
+    static animationSpeed:number = 5;
+    static read() {
+        const lst:[
+            BlockDisplay|undefined,BlockDisplay|undefined,
+            BlockDisplay|undefined,BlockDisplay|undefined,
+            Interaction?, Interaction?,
+            Interaction?, Interaction?,
+            Interaction?, Interaction?,
+            Interaction?, Interaction?,
+            Interaction?, Interaction?,
+            Interaction?, Interaction?,
+            Interaction?, Interaction?
+        ] = [
+            BlockDisplay.fromFile(mine,"Door/1"), BlockDisplay.fromFile(mine,"Door/2"),
+            BlockDisplay.fromFile(mine,"Door/3"), BlockDisplay.fromFile(mine,"Door/4")
+        ]
+        for (let i = 0; i < 14; i++) { lst[i+4]=Interaction.fromFile(mine,"Door/int"+i); }
+        if (
+            lst[ 0]==null||lst[ 1]==null||
+            lst[ 2]==null||lst[ 3]==null||
+            lst[ 4]==null||lst[ 5]==null||
+            lst[ 6]==null||lst[ 7]==null||
+            lst[ 8]==null||lst[ 9]==null||
+            lst[10]==null||lst[11]==null||
+            lst[12]==null||lst[13]==null||
+            lst[14]==null||lst[15]==null||
+            lst[16]==null||lst[17]==null
         ) return;
-    door = lst as doorArray;
-    registerInteractionDetecter(mine,["Door"],doorToggle);
-    registerAttackDetecter(mine,["Door"],doorKill);
-});
-function SaveDoor() {
-    if (door==null) return;
-    if (!fs.existsSync(__dirname+"/Saves/Door")) fs.mkdirSync(__dirname+"/Saves/Door");
-    door[0].savetoFile("Door/1"); door[1].savetoFile("Door/2");
-    door[2].savetoFile("Door/3"); door[3].savetoFile("Door/4");
-    door[4].savetoFile("Door/int0"); door[5].savetoFile("Door/int1");
-    door[6].savetoFile("Door/int2"); door[7].savetoFile("Door/int3");
-    door[8].savetoFile("Door/int4"); door[9].savetoFile("Door/int5");
-    door[10].savetoFile("Door/int6"); door[11].savetoFile("Door/int7");
-    door[12].savetoFile("Door/int8"); door[13].savetoFile("Door/int9");
-    door[14].savetoFile("Door/int10"); door[15].savetoFile("Door/int11");
-    door[16].savetoFile("Door/int12"); door[17].savetoFile("Door/int13");
-}
-function buildDoor() {
-    if (door==null) return;
-    for (let i = 0; i < door.length; i++) { door[i].build(); }
-    mine.cmd("fill "+door[0].Pos.join(" ")+" "+door[3].Pos.join(" ")+" barrier");
-    registerInteractionDetecter(mine,["Door"],doorToggle);
-    registerAttackDetecter(mine,["Door"],doorKill);
-}
-function animateDoor() {
-    if (door==null) return;
-    door[0].animate(animationSpeed); door[1].animate(animationSpeed);
-    door[2].animate(animationSpeed); door[3].animate(animationSpeed);
-}
-function doorOpen() {
-    if (door==null) return;
-    doorOpened=true;
-    //door1
-    (door[0].transformation as transformationObj).left_rotation = Quat90;
-    (door[0].transformation as transformationObj).translation   = [3/16,0,1];
-    (door[1].transformation as transformationObj).left_rotation = Quat90;
-    (door[1].transformation as transformationObj).translation   = [3/16,0,1];
-    //door2
-    (door[2].transformation as transformationObj).left_rotation = QuatNeg90;
-    (door[2].transformation as transformationObj).translation   = [1-3/16,0,1];
-    (door[3].transformation as transformationObj).left_rotation = QuatNeg90;
-    (door[3].transformation as transformationObj).translation   = [1-3/16,0,1];
-    animateDoor();
-    SaveDoor();
-    var playerPos:Vec3<number> = door[0].Pos;
-    door[ 4].Pos=[playerPos[0]+ 3/32,playerPos[1],playerPos[2]+29/32];
-    door[ 5].Pos=[playerPos[0]+ 3/32,playerPos[1],playerPos[2]+23/32];
-    door[ 6].Pos=[playerPos[0]+ 3/32,playerPos[1],playerPos[2]+17/32];
-    door[ 7].Pos=[playerPos[0]+ 3/32,playerPos[1],playerPos[2]+11/32];
-    door[ 8].Pos=[playerPos[0]+ 3/32,playerPos[1],playerPos[2]+ 3/32];
-    door[ 9].Pos=[playerPos[0]+ 1/64,playerPos[1],playerPos[2]+ 7/32];
-    door[10].Pos=[playerPos[0]+ 5/32,playerPos[1],playerPos[2]+ 7/32];
-
-    door[11].Pos=[playerPos[0]+61/32,playerPos[1],playerPos[2]+29/32];
-    door[12].Pos=[playerPos[0]+61/32,playerPos[1],playerPos[2]+23/32];
-    door[13].Pos=[playerPos[0]+61/32,playerPos[1],playerPos[2]+17/32];
-    door[14].Pos=[playerPos[0]+61/32,playerPos[1],playerPos[2]+11/32];
-    door[15].Pos=[playerPos[0]+61/32,playerPos[1],playerPos[2]+ 3/32];
-    door[16].Pos=[playerPos[0]+63/32,playerPos[1],playerPos[2]+ 7/32];
-    door[17].Pos=[playerPos[0]+59/32,playerPos[1],playerPos[2]+ 7/32];
-    for (let i = 4; i < door.length; i++) { door[i].update(); }
-    mine.cmd("fill "+door[0].Pos.join(" ")+" "+door[3].Pos.join(" ")+" air");
-}
-function doorClose() {
-    if (door==null) return;
-    doorOpened=false;
-    //door1
-    (door[0].transformation as transformationObj).left_rotation = QuatIdentity;
-    (door[0].transformation as transformationObj).translation   = [0,0,1];
-    (door[1].transformation as transformationObj).left_rotation = QuatIdentity;
-    (door[1].transformation as transformationObj).translation   = [0,0,1];
-    //door2
-    (door[2].transformation as transformationObj).left_rotation = QuatIdentity;
-    (door[2].transformation as transformationObj).translation   = [1,0,1];
-    (door[3].transformation as transformationObj).left_rotation = QuatIdentity;
-    (door[3].transformation as transformationObj).translation   = [1,0,1];
-    animateDoor();
-    SaveDoor();
-    var playerPos:Vec3<number> = door[0].Pos;
-    door[ 4].Pos=[playerPos[0]+ 3/32,playerPos[1],playerPos[2]+29/32+0.0005];
-    door[ 5].Pos=[playerPos[0]+ 9/32,playerPos[1],playerPos[2]+29/32+0.0005];
-    door[ 6].Pos=[playerPos[0]+15/32,playerPos[1],playerPos[2]+29/32+0.0005];
-    door[ 7].Pos=[playerPos[0]+21/32,playerPos[1],playerPos[2]+29/32+0.0005];
-    door[ 8].Pos=[playerPos[0]+27/32,playerPos[1],playerPos[2]+29/32+0.0005];
-    door[ 9].Pos=[playerPos[0]+31/32,playerPos[1],playerPos[2]+31/32+0.0005];
-    door[10].Pos=[playerPos[0]+31/32,playerPos[1],playerPos[2]+27/32+0.0005];
-
-    door[11].Pos=[playerPos[0]+35/32,playerPos[1],playerPos[2]+29/32+0.0005];
-    door[12].Pos=[playerPos[0]+41/32,playerPos[1],playerPos[2]+29/32+0.0005];
-    door[13].Pos=[playerPos[0]+47/32,playerPos[1],playerPos[2]+29/32+0.0005];
-    door[14].Pos=[playerPos[0]+53/32,playerPos[1],playerPos[2]+29/32+0.0005];
-    door[15].Pos=[playerPos[0]+59/32,playerPos[1],playerPos[2]+29/32+0.0005];
-    door[16].Pos=[playerPos[0]+63/32,playerPos[1],playerPos[2]+31/32+0.0005];
-    door[17].Pos=[playerPos[0]+63/32,playerPos[1],playerPos[2]+27/32+0.0005];
-    for (let i = 4; i < door.length; i++) { door[i].update(); }
-    mine.cmd("fill "+door[0].Pos.join(" ")+" "+door[3].Pos.join(" ")+" barrier");
-}
-function doorKill() {
-    if (door==null) return;
-    for (let i = 0; i < door.length; i++) { door[i].kill(); }
-    fs.rmSync(__dirname+"/Saves/Door/1.json"    ); fs.rmSync(__dirname+"/Saves/Door/2.json"    );
-    fs.rmSync(__dirname+"/Saves/Door/3.json"    ); fs.rmSync(__dirname+"/Saves/Door/4.json"    );
-    fs.rmSync(__dirname+"/Saves/Door/int0.json" ); fs.rmSync(__dirname+"/Saves/Door/int1.json" );
-    fs.rmSync(__dirname+"/Saves/Door/int2.json" ); fs.rmSync(__dirname+"/Saves/Door/int3.json" );
-    fs.rmSync(__dirname+"/Saves/Door/int4.json" ); fs.rmSync(__dirname+"/Saves/Door/int5.json" );
-    fs.rmSync(__dirname+"/Saves/Door/int6.json" ); fs.rmSync(__dirname+"/Saves/Door/int7.json" );
-    fs.rmSync(__dirname+"/Saves/Door/int8.json" ); fs.rmSync(__dirname+"/Saves/Door/int9.json" );
-    fs.rmSync(__dirname+"/Saves/Door/int10.json"); fs.rmSync(__dirname+"/Saves/Door/int11.json");
-    fs.rmSync(__dirname+"/Saves/Door/int12.json"); fs.rmSync(__dirname+"/Saves/Door/int13.json");
-    fs.rmdirSync(__dirname+"/Saves/Door");
-    mine.cmd("fill "+door[0].Pos.join(" ")+" "+door[3].Pos.join(" ")+" air");
-}
-function doorToggle() { if (doorOpened) doorClose(); else doorOpen(); }
-mine.Emitter.on("playerChat",async(e:{name:string,chat:string,player:PlayerData,preventDefault:()=>void})=>{
-    if (e.chat=="summonDoor") { e.preventDefault();
-        var playerPos:Vec3<number> = (await mine.playerData[e.name].updatePos()) as Vec3<number>;
-        door = [
-            mine.summonBlockDisplay([playerPos[0]      ,playerPos[1]  ,playerPos[2]             ],["Door"],null,"minecraft:spruce_door",{facing:"east",  half:"lower", hinge:"left",  open:"false"},{...EmptyTransformationObj,translation:[0,0,1],right_rotation:Quat90}),
-            mine.summonBlockDisplay([playerPos[0]      ,playerPos[1]+1,playerPos[2]             ],["Door"],null,"minecraft:spruce_door",{facing:"east",  half:"upper", hinge:"left",  open:"false"},{...EmptyTransformationObj,translation:[0,0,1],right_rotation:Quat90}),
-            mine.summonBlockDisplay([playerPos[0]+1    ,playerPos[1]  ,playerPos[2]             ],["Door"],null,"minecraft:spruce_door",{facing:"south", half:"lower", hinge:"right", open:"false"},{...EmptyTransformationObj,translation:[1,0,1],right_rotation:Quat180}),
-            mine.summonBlockDisplay([playerPos[0]+1    ,playerPos[1]+1,playerPos[2]             ],["Door"],null,"minecraft:spruce_door",{facing:"south", half:"upper", hinge:"right", open:"false"},{...EmptyTransformationObj,translation:[1,0,1],right_rotation:Quat180}),
+        Door.door = lst as doorType;
+        registerInteractionDetecter(mine,["Door"],Door.toggle);
+        registerAttackDetecter(mine,["Door"],Door.kill);
+    }
+    static async summon(playerPos:Vec3<number>) {
+        Door.door = [
+            mine.summonBlockDisplay([playerPos[0]      ,playerPos[1]  ,playerPos[2]             ],["Door"],null,{...EmptyTransformationObj,translation:[0,0,1],right_rotation:Quat90 },"minecraft:spruce_door",{facing:"east",  half:"lower", hinge:"left",  open:"false"}),
+            mine.summonBlockDisplay([playerPos[0]      ,playerPos[1]+1,playerPos[2]             ],["Door"],null,{...EmptyTransformationObj,translation:[0,0,1],right_rotation:Quat90 },"minecraft:spruce_door",{facing:"east",  half:"upper", hinge:"left",  open:"false"}),
+            mine.summonBlockDisplay([playerPos[0]+1    ,playerPos[1]  ,playerPos[2]             ],["Door"],null,{...EmptyTransformationObj,translation:[1,0,1],right_rotation:Quat180},"minecraft:spruce_door",{facing:"south", half:"lower", hinge:"right", open:"false"}),
+            mine.summonBlockDisplay([playerPos[0]+1    ,playerPos[1]+1,playerPos[2]             ],["Door"],null,{...EmptyTransformationObj,translation:[1,0,1],right_rotation:Quat180},"minecraft:spruce_door",{facing:"south", half:"upper", hinge:"right", open:"false"}),
             mine.summonInteraction ([playerPos[0]+ 3/32,playerPos[1]  ,playerPos[2]+29/32+0.0005],["Door"],null,3/16+0.001,2,true),
             mine.summonInteraction ([playerPos[0]+ 9/32,playerPos[1]  ,playerPos[2]+29/32+0.0005],["Door"],null,3/16+0.001,2,true),
             mine.summonInteraction ([playerPos[0]+15/32,playerPos[1]  ,playerPos[2]+29/32+0.0005],["Door"],null,3/16+0.001,2,true),
@@ -903,127 +872,279 @@ mine.Emitter.on("playerChat",async(e:{name:string,chat:string,player:PlayerData,
             mine.summonInteraction ([playerPos[0]+63/32,playerPos[1]  ,playerPos[2]+31/32+0.0005],["Door"],null,1/16+0.001,2,true),
             mine.summonInteraction ([playerPos[0]+63/32,playerPos[1]  ,playerPos[2]+27/32+0.0005],["Door"],null,1/16+0.001,2,true)
         ];
-        buildDoor(); SaveDoor();
+        Door.build();
+        Door.doorOpened=false;
     }
-    else if (e.chat=="open"     && door != null) { e.preventDefault(); if (!doorOpened) doorOpen(); }
-    else if (e.chat=="close"    && door != null) { e.preventDefault(); if (doorOpened)  doorClose();}
-    else if (e.chat=="toggle"   && door != null) { e.preventDefault(); doorToggle();}
-    else if (e.chat=="killDoor" && door != null) { e.preventDefault(); doorKill();  }
-});
-//#endregion
+    static build() {
+        var door:doorType|undefined = Door.door;
+        if (door==null) return;
+        for (let i = 0; i < door.length; i++) { door[i].build(); }
+        mine.cmd("fill "+door[0].Pos.join(" ")+" "+door[3].Pos.join(" ")+" minecraft:barrier");
+        registerInteractionDetecter(mine,["Door"],Door.toggle);
+        registerAttackDetecter(mine,["Door"],Door.kill);
+        this.save();
+    }
+    static save() {
+        var door:doorType|undefined = Door.door;
+        if (door==null) return;
+        if (!fs.existsSync(__dirname+"/Saves/Door")) fs.mkdirSync(__dirname+"/Saves/Door");
+        door[0].savetoFile("Door/1"); door[1].savetoFile("Door/2");
+        door[2].savetoFile("Door/3"); door[3].savetoFile("Door/4");
+        door[4].savetoFile("Door/int0"); door[5].savetoFile("Door/int1");
+        door[6].savetoFile("Door/int2"); door[7].savetoFile("Door/int3");
+        door[8].savetoFile("Door/int4"); door[9].savetoFile("Door/int5");
+        door[10].savetoFile("Door/int6"); door[11].savetoFile("Door/int7");
+        door[12].savetoFile("Door/int8"); door[13].savetoFile("Door/int9");
+        door[14].savetoFile("Door/int10"); door[15].savetoFile("Door/int11");
+        door[16].savetoFile("Door/int12"); door[17].savetoFile("Door/int13");
+    }
+    static animate() {
+        var door:doorType|undefined = Door.door;
+        if (door==null) return;
+        var animationSpeed:number =Door.animationSpeed
+        door[0].animate(animationSpeed); door[1].animate(animationSpeed);
+        door[2].animate(animationSpeed); door[3].animate(animationSpeed);
+    }
+    //#region open/close
+    static open() {
+        var door:doorType|undefined = Door.door;
+        if (door==null||Door.doorOpened==true) return;
+        Door.doorOpened=true;
+        //door1
+        (door[0].transformation as transformationObj).left_rotation = Quat90;
+        (door[0].transformation as transformationObj).translation   = [3/16,0,1];
+        (door[1].transformation as transformationObj).left_rotation = Quat90;
+        (door[1].transformation as transformationObj).translation   = [3/16,0,1];
+        //door2
+        (door[2].transformation as transformationObj).left_rotation = QuatNeg90;
+        (door[2].transformation as transformationObj).translation   = [1-3/16,0,1];
+        (door[3].transformation as transformationObj).left_rotation = QuatNeg90;
+        (door[3].transformation as transformationObj).translation   = [1-3/16,0,1];
+        Door.animate();
+        Door.save();
+        var playerPos:Vec3<number> = door[0].Pos;
+        door[ 4].Pos=[playerPos[0]+ 3/32,playerPos[1],playerPos[2]+29/32];
+        door[ 5].Pos=[playerPos[0]+ 3/32,playerPos[1],playerPos[2]+23/32];
+        door[ 6].Pos=[playerPos[0]+ 3/32,playerPos[1],playerPos[2]+17/32];
+        door[ 7].Pos=[playerPos[0]+ 3/32,playerPos[1],playerPos[2]+11/32];
+        door[ 8].Pos=[playerPos[0]+ 3/32,playerPos[1],playerPos[2]+ 3/32];
+        door[ 9].Pos=[playerPos[0]+ 1/64,playerPos[1],playerPos[2]+ 7/32];
+        door[10].Pos=[playerPos[0]+ 5/32,playerPos[1],playerPos[2]+ 7/32];
 
-//#region BlockDisplays
-async function relativePos(pos:Vec3<string>|null,relativePos:Vec3<number>):Promise<Vec3<number>> {
-    return new Promise<Vec3<number>>(async(resolve:(value:Vec3<number>)=>void)=>{
-        if (pos==null || (pos[0]=="~"&&pos[1]=="~"&&pos[2]=="~")) { resolve(relativePos);return; }
-        var finalPos:Vec3<number> = [0,0,0];
-        for (let i = 0; i < pos.length; i++) {
-            const num = pos[i];
-            if (num=="~") { finalPos[i]=relativePos[i]; }
-            else if (num.startsWith("~")){finalPos[i]=relativePos[i]+parseFloat(num.replace("~","")); }
-            else{finalPos[i]=parseFloat(num); }
-        }
-        resolve(finalPos); return;
-    });
+        door[11].Pos=[playerPos[0]+61/32,playerPos[1],playerPos[2]+29/32];
+        door[12].Pos=[playerPos[0]+61/32,playerPos[1],playerPos[2]+23/32];
+        door[13].Pos=[playerPos[0]+61/32,playerPos[1],playerPos[2]+17/32];
+        door[14].Pos=[playerPos[0]+61/32,playerPos[1],playerPos[2]+11/32];
+        door[15].Pos=[playerPos[0]+61/32,playerPos[1],playerPos[2]+ 3/32];
+        door[16].Pos=[playerPos[0]+63/32,playerPos[1],playerPos[2]+ 7/32];
+        door[17].Pos=[playerPos[0]+59/32,playerPos[1],playerPos[2]+ 7/32];
+        for (let i = 4; i < door.length; i++) { door[i].update(); }
+        mine.cmd("fill "+door[0].Pos.join(" ")+" "+door[3].Pos.join(" ")+" minecraft:air");
+    }
+    static close() {
+        var door:doorType|undefined = Door.door;
+        if (door==null||Door.doorOpened==false) return;
+        Door.doorOpened=false;
+        //door1
+        (door[0].transformation as transformationObj).left_rotation = QuatIdentity;
+        (door[0].transformation as transformationObj).translation   = [0,0,1];
+        (door[1].transformation as transformationObj).left_rotation = QuatIdentity;
+        (door[1].transformation as transformationObj).translation   = [0,0,1];
+        //door2
+        (door[2].transformation as transformationObj).left_rotation = QuatIdentity;
+        (door[2].transformation as transformationObj).translation   = [1,0,1];
+        (door[3].transformation as transformationObj).left_rotation = QuatIdentity;
+        (door[3].transformation as transformationObj).translation   = [1,0,1];
+        Door.animate();
+        Door.save();
+        var playerPos:Vec3<number> = door[0].Pos;
+        door[ 4].Pos=[playerPos[0]+ 3/32,playerPos[1],playerPos[2]+29/32+0.0005];
+        door[ 5].Pos=[playerPos[0]+ 9/32,playerPos[1],playerPos[2]+29/32+0.0005];
+        door[ 6].Pos=[playerPos[0]+15/32,playerPos[1],playerPos[2]+29/32+0.0005];
+        door[ 7].Pos=[playerPos[0]+21/32,playerPos[1],playerPos[2]+29/32+0.0005];
+        door[ 8].Pos=[playerPos[0]+27/32,playerPos[1],playerPos[2]+29/32+0.0005];
+        door[ 9].Pos=[playerPos[0]+31/32,playerPos[1],playerPos[2]+31/32+0.0005];
+        door[10].Pos=[playerPos[0]+31/32,playerPos[1],playerPos[2]+27/32+0.0005];
+
+        door[11].Pos=[playerPos[0]+35/32,playerPos[1],playerPos[2]+29/32+0.0005];
+        door[12].Pos=[playerPos[0]+41/32,playerPos[1],playerPos[2]+29/32+0.0005];
+        door[13].Pos=[playerPos[0]+47/32,playerPos[1],playerPos[2]+29/32+0.0005];
+        door[14].Pos=[playerPos[0]+53/32,playerPos[1],playerPos[2]+29/32+0.0005];
+        door[15].Pos=[playerPos[0]+59/32,playerPos[1],playerPos[2]+29/32+0.0005];
+        door[16].Pos=[playerPos[0]+63/32,playerPos[1],playerPos[2]+31/32+0.0005];
+        door[17].Pos=[playerPos[0]+63/32,playerPos[1],playerPos[2]+27/32+0.0005];
+        for (let i = 4; i < door.length; i++) { door[i].update(); }
+        mine.cmd("fill "+door[0].Pos.join(" ")+" "+door[3].Pos.join(" ")+" minecraft:barrier");
+    }
+    static toggle() { if (Door.doorOpened) Door.close(); else Door.open(); }
+    //#endregion open/close
+    static kill() {
+        var door:doorType|undefined = Door.door;
+        if (door==null) return;
+        mine.cmd("fill "+door[0].Pos.join(" ")+" "+door[3].Pos.join(" ")+" minecraft:air");
+        mine.cmd("kill @e[nbt={Tags:[\"FromServer\",\"Door\"]}]").then((out:string)=>{});
+        door=undefined;
+        fs.rmSync(__dirname+"/Saves/Door/1.json"    ); fs.rmSync(__dirname+"/Saves/Door/2.json"    );
+        fs.rmSync(__dirname+"/Saves/Door/3.json"    ); fs.rmSync(__dirname+"/Saves/Door/4.json"    );
+        fs.rmSync(__dirname+"/Saves/Door/int0.json" ); fs.rmSync(__dirname+"/Saves/Door/int1.json" );
+        fs.rmSync(__dirname+"/Saves/Door/int2.json" ); fs.rmSync(__dirname+"/Saves/Door/int3.json" );
+        fs.rmSync(__dirname+"/Saves/Door/int4.json" ); fs.rmSync(__dirname+"/Saves/Door/int5.json" );
+        fs.rmSync(__dirname+"/Saves/Door/int6.json" ); fs.rmSync(__dirname+"/Saves/Door/int7.json" );
+        fs.rmSync(__dirname+"/Saves/Door/int8.json" ); fs.rmSync(__dirname+"/Saves/Door/int9.json" );
+        fs.rmSync(__dirname+"/Saves/Door/int10.json"); fs.rmSync(__dirname+"/Saves/Door/int11.json");
+        fs.rmSync(__dirname+"/Saves/Door/int12.json"); fs.rmSync(__dirname+"/Saves/Door/int13.json");
+        fs.rmdirSync(__dirname+"/Saves/Door");
+        Door.doorOpened=false;
+    }
 }
 
-var displays:BlockDisplay[];
-var displayIndex:number;
-function saveDisplays() {
-    fs.writeFileSync(__dirname+"/Saves/Displays.json",JSON.stringify( {"index":displayIndex,"displays":displays.map( (el:BlockDisplay)=>el.toJson() )} ));
-}
-mine.Emitter.on("serverStart",(e:{preventDefault:()=>void})=>{
+//#region blockDisplays
+var blockDisplays:BlockDisplay[];
+var blockDisplayIndex:number;
+function blockDisplaysRead() {
     try {
         var data:{index:number,displays:{ uuid: string; nbt: { [key: string]: string | string[]; }; }[]} = JSON.parse(fs.readFileSync(__dirname+"/Saves/Displays.json").toString());
-        displays = data.displays.map((el:{ uuid: string; nbt: { [key: string]: string | string[]; }; })=>BlockDisplay.fromJson(mine,el));
-        displayIndex=data.index;
-    } catch (error) {
-        displays=[];displayIndex=-1;
-    }
+        blockDisplays = data.displays.map((el:{ uuid: string; nbt: { [key: string]: string | string[]; }; })=>BlockDisplay.fromJson(mine,el));
+        blockDisplayIndex=data.index;
+    } catch (err:any) { blockDisplays=[];blockDisplayIndex=-1; }
+}
+function blockDisplaysSave() {
+    fs.writeFileSync(__dirname+"/Saves/Displays.json",JSON.stringify( {"index":blockDisplayIndex,"displays":blockDisplays.map( (el:BlockDisplay)=>el.toJson() )} ));
+}
+function blockDisplaysKillAll() {
+    mine.cmd("kill @e[nbt={Tags:[\"FromServer\",\"BlockDisplays\",\"Tests\"]}]").then((out:string)=>{});
+    blockDisplays=[];
+    blockDisplayIndex=-1;
+    blockDisplaysSave();
+}
 
+function blockDisplaySummon(pos:Vec3<number>) {
+    if (blockDisplays.length!=0) { var display = blockDisplays[blockDisplayIndex];display.glowing=false;display.update(); }
+    blockDisplays.push(mine.summonBlockDisplay(pos,null,null,EmptyTransformationObj,"minecraft:diamond_block",null));
+    var display = blockDisplays[blockDisplays.length-1];
+    display.addTags("Tests").glowing=true;
+    display.build();
+    blockDisplayIndex=blockDisplays.length-1;
+    blockDisplaysSave();
+}
+function blockDisplayKill() {
+    if (blockDisplayIndex==-1) return;
+    var display:BlockDisplay = blockDisplays[blockDisplayIndex];
+    if (display==null) return;
+    
+    display.kill();
+    delete blockDisplays[blockDisplayIndex];
+    blockDisplays=blockDisplays.filter((el:BlockDisplay)=>el!=null);
+
+    if (blockDisplays.length>0){
+        var display:BlockDisplay = blockDisplays[blockDisplays.length-1];
+        display.glowing = true; display.update();
+        blockDisplayIndex = blockDisplays.length-1;
+    } else blockDisplayIndex = -1;
+    blockDisplaysSave();
+}
+
+function blockDisplayRotate() {
+    if (blockDisplayIndex==-1) return;
+    var display:BlockDisplay = blockDisplays[blockDisplayIndex];
+    if (display==null) return;
+    
+    (display.transformation as transformationObj).left_rotation = AxAngToQuat([0,1,0],Math.PI/4);
+    display.animate(20);
+    blockDisplaysSave();
+}
+function blockDisplayUnRotate() {
+    if (blockDisplayIndex==-1) return;
+    var display:BlockDisplay = blockDisplays[blockDisplayIndex];
+    if (display==null) return;
+    
+    (display.transformation as transformationObj).left_rotation = QuatIdentity;
+    display.animate(20);
+    blockDisplaysSave();
+}
+function blockDisplaysNext() {
+    if (blockDisplayIndex==-1) return;
+    var display:BlockDisplay = blockDisplays[blockDisplayIndex];
+    if (display==null) return;
+    
+    //unglow previous
+    display.glowing=false;display.update();
+    //set selected
+    blockDisplayIndex++;
+    blockDisplayIndex%=blockDisplays.length;
+    display = blockDisplays[blockDisplayIndex];
+    display.glowing=true;display.update();
+    blockDisplaysSave();
+}
+async function blockDisplayMove(relPos:Vec3<string>) {
+    if (blockDisplayIndex==-1) return;
+    var display:BlockDisplay = blockDisplays[blockDisplayIndex];
+    if (display==null) return;
+    display.Pos = await relativePos(relPos,display.Pos);
+    display.update().then((out:boolean)=>{});
+    blockDisplaysSave();
+}
+async function blockDisplayTp(relPos:Vec3<string>,name:string) {
+    if (blockDisplayIndex==-1) return;
+    var display:BlockDisplay = blockDisplays[blockDisplayIndex];
+    if (display==null) return;
+    var playerPos:Vec3<number> = (await mine.playerData[name].updatePos()) as Vec3<number>;
+    display.Pos = await relativePos(relPos,playerPos);
+    display.update().then((out:boolean)=>{});
+    blockDisplaysSave();
+}
+//#endregion blockDisplays
+
+mine.Emitter.on("serverStart",(e:{preventDefault:()=>void})=>{
+    blockDisplaysRead();
+    Door.read();
 });
 mine.Emitter.on("playerChat",async(e:{name:string,chat:string,player:PlayerData,preventDefault:()=>void})=>{
-    if (e.chat=="summon") { e.preventDefault();
-        var finalPos:Vec3<number> = (await mine.playerData[e.name].updatePos()) as Vec3<number>;
-
-        if (displays.length!=0&&displayIndex!=-1) { var display = displays[displayIndex];display.glowing=false;display.update(); }
-        displays.push(mine.summonBlockDisplay(finalPos,null,null,"minecraft:diamond_block",null,EmptyTransformationObj,true));
-        var display = displays[displays.length-1];
-        display.addTags("Tests").build();
-        displayIndex=displays.length-1;
-        saveDisplays();
-        return;
-    } else if (e.chat.match(/^summon (((-|\+)?\d+(\.\d+)?)|~|(~((-|\+)?\d+(\.\d+)?))) (((-|\+)?\d+(\.\d+)?)|~|(~((-|\+)?\d+(\.\d+)?))) (((-|\+)?\d+(\.\d+)?)|~|(~((-|\+)?\d+(\.\d+)?)))$/g)) { e.preventDefault();
-        const pos:Vec3<string> = e.chat.replace("summon ","").split(" ") as Vec3<string>;
-        var playerPos:Vec3<number> = (await mine.playerData[e.name].updatePos()) as Vec3<number>;
-        var finalPos:Vec3<number> = await relativePos(pos,playerPos);
-
-        if (displays.length!=0) { var display = displays[displayIndex];display.glowing=false;display.update(); }
-        displays.push(mine.summonBlockDisplay(finalPos,null,null,"minecraft:diamond_block",null,EmptyTransformationObj,true));
-        var display = displays[displays.length-1];
-        display.addTags("Tests").build();
-        displayIndex=displays.length-1;
-        saveDisplays();
-        return;
-    } else if (e.chat=="kill-all") { e.preventDefault();
-        mine.cmd("kill @e[nbt={Tags:[\"FromServer\",\"Displays\",\"Tests\"]}]").then((out:string)=>{});
-        displays=[];
-        displayIndex=-1;
-        saveDisplays();
-        return;
-    } else if (e.chat=="kill" || e.chat=="rotate" || e.chat=="un-rotate" || e.chat=="next" || e.chat.startsWith("move ") || e.chat.startsWith("tp ")) {
-        if (displayIndex==-1) return;
-        var display = displays[displayIndex];
-        if (display==null) return;
-        e.preventDefault();
-
-        if (e.chat=="kill"){
-            display.kill();
-            delete displays[displayIndex];
-            displays=displays.filter((el:BlockDisplay)=>el!=null);
-
-            if (displays.length>0){
-                display = displays[displays.length-1];
-                display.glowing=true; display.update();
-                displayIndex=displays.length-1;
-            } else displayIndex=-1;
-            saveDisplays();
-            return;
-        } else if (e.chat=="rotate"){
-            (display.transformation as transformationObj).left_rotation = [0,0.383,0,0.924];
-            display.animate(20);
-            saveDisplays();
-            return;
-        } else if (e.chat=="un-rotate"){
-            (display.transformation as transformationObj).left_rotation = [0,0,0,1];
-            display.animate(20);
-            saveDisplays();
-            return;
-        } else if (e.chat=="next") {
-            //unglow previous
-            var display = displays[displayIndex];display.glowing=false;display.update();
-            //set selected
-            displayIndex++;
-            displayIndex%=displays.length;
-            display = displays[displayIndex];display.glowing=true;display.update();
-            saveDisplays();
-            return;
-        }else if (e.chat.match(/^move (((-|\+)?\d+(\.\d+)?)|~|(~((-|\+)?\d+(\.\d+)?))) (((-|\+)?\d+(\.\d+)?)|~|(~((-|\+)?\d+(\.\d+)?))) (((-|\+)?\d+(\.\d+)?)|~|(~((-|\+)?\d+(\.\d+)?)))$/g)) {
-            const pos:Vec3<string> = e.chat.replace("move ","").split(" ") as Vec3<string>;
-            display.Pos = await relativePos(pos,display.Pos);
-            display.update().then((out:boolean)=>{});
-            saveDisplays();
-            return;
-        } else if (e.chat.match(/^tp (((-|\+)?\d+(\.\d+)?)|~|(~((-|\+)?\d+(\.\d+)?))) (((-|\+)?\d+(\.\d+)?)|~|(~((-|\+)?\d+(\.\d+)?))) (((-|\+)?\d+(\.\d+)?)|~|(~((-|\+)?\d+(\.\d+)?)))$/g)) {
-            const pos:Vec3<string> = e.chat.replace("tp ","").split(" ") as Vec3<string>;
+    if (e.chat.startsWith("summon")) {
+        if (e.chat.startsWith("summon display")) {
+            if (e.chat.startsWith("summon display block")) {
+                if (e.chat == "summon display block") { e.preventDefault();
+                    var finalPos:Vec3<number> = (await mine.playerData[e.name].updatePos()) as Vec3<number>;
+                    blockDisplaySummon(finalPos); return;
+                } else if (e.chat.match(/^summon display block (((-|\+)?\d+(\.\d+)?)|~|(~((-|\+)?\d+(\.\d+)?))) (((-|\+)?\d+(\.\d+)?)|~|(~((-|\+)?\d+(\.\d+)?))) (((-|\+)?\d+(\.\d+)?)|~|(~((-|\+)?\d+(\.\d+)?)))$/g)) { e.preventDefault();
+                    const pos:Vec3<string> = e.chat.replace("summon ","").split(" ") as Vec3<string>;
+                    var playerPos:Vec3<number> = (await mine.playerData[e.name].updatePos()) as Vec3<number>;
+                    var finalPos:Vec3<number> = await relativePos(pos,playerPos);
+                    blockDisplaySummon(finalPos); return;
+                }
+            }
+        } else if (e.chat.startsWith("summon door")) {
             var playerPos:Vec3<number> = (await mine.playerData[e.name].updatePos()) as Vec3<number>;
-            var finalPos:Vec3<number> = await relativePos(pos,playerPos);
-    
-            display.Pos=finalPos;
-            display.update().then((out:boolean)=>{});
-            saveDisplays();
-            return;
+            Door.summon(playerPos);
+        }
+    } else if (e.chat.startsWith("door")) {
+        if (e.chat.startsWith("door open")) {
+            e.preventDefault(); Door.open();
+        } else if (e.chat.startsWith("door close")) {
+            e.preventDefault(); Door.close();
+        } else if (e.chat.startsWith("door toggle")) {
+            e.preventDefault(); Door.toggle();
+        } else if (e.chat.startsWith("door kill")) {
+            e.preventDefault(); Door.kill();
+        }
+    } else if (e.chat.startsWith("display")) {
+        if (e.chat.startsWith("display block")) {
+            if (e.chat.startsWith("display block kill")) {
+                if (e.chat=="display block kill all") { blockDisplaysKillAll(); }
+                else if (e.chat=="display block kill") { blockDisplayKill(); }
+            } else if (e.chat=="display block next") {
+                blockDisplaysNext();
+            } else if (e.chat=="display block rotate") {
+                blockDisplayRotate();
+            } else if (e.chat=="display block un-rotate") {
+                blockDisplayUnRotate();
+            } else if (e.chat.match(/^display block move (((-|\+)?\d+(\.\d+)?)|~|(~((-|\+)?\d+(\.\d+)?))) (((-|\+)?\d+(\.\d+)?)|~|(~((-|\+)?\d+(\.\d+)?))) (((-|\+)?\d+(\.\d+)?)|~|(~((-|\+)?\d+(\.\d+)?)))$/g)) {
+                var relPos:Vec3<string> = e.chat.replace("display block move ","").split(" ") as Vec3<string>;
+                blockDisplayMove(relPos);
+            } else if (e.chat.match(/^display block tp (((-|\+)?\d+(\.\d+)?)|~|(~((-|\+)?\d+(\.\d+)?))) (((-|\+)?\d+(\.\d+)?)|~|(~((-|\+)?\d+(\.\d+)?))) (((-|\+)?\d+(\.\d+)?)|~|(~((-|\+)?\d+(\.\d+)?)))$/g)) {
+                var relPos:Vec3<string> = e.chat.replace("display block tp ","").split(" ") as Vec3<string>;
+                blockDisplayTp(relPos,e.name);
+            }
         }
     }
 });
-//#endregion
