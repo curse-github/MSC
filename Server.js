@@ -61,6 +61,15 @@ var __generator = (this && this.__generator) || function (thisArg, body) {
         if (op[0] & 5) throw op[1]; return { value: op[0] ? op[1] : void 0, done: true };
     }
 };
+var __spreadArray = (this && this.__spreadArray) || function (to, from, pack) {
+    if (pack || arguments.length === 2) for (var i = 0, l = from.length, ar; i < l; i++) {
+        if (ar || !(i in from)) {
+            if (!ar) ar = Array.prototype.slice.call(from, 0, i);
+            ar[i] = from[i];
+        }
+    }
+    return to.concat(ar || Array.prototype.slice.call(from));
+};
 Object.defineProperty(exports, "__esModule", { value: true });
 var Colors = /** @class */ (function () {
     function Colors() {
@@ -126,7 +135,18 @@ function generateUUID() {
         return (c === 'x' ? b : (b & 0x3 | 0x8)).toString(16);
     });
 }
+var QuatIdentity = [0, 0, 0, 1];
 var EmptyTransformationObj = { translation: [0, 0, 0], left_rotation: [0, 0, 0, 1], scale: [1, 1, 1], right_rotation: [0, 0, 0, 1] };
+/**
+ * converts axis angle to quaternion
+ * @param {Vec3<number>} x axis
+ * @param {number} theta angle
+ */
+function AxAngToQuat(x, theta) {
+    var a = theta / 2;
+    var b = Math.sin(a);
+    return __spreadArray(__spreadArray([], x.map(function (el) { return (el * b); }), true), [Math.cos(a)], false).map(function (el) { return Math.round(el * 1000) / 1000; });
+}
 var Minecraft = /** @class */ (function () {
     function Minecraft() {
         var _this = this;
@@ -644,8 +664,14 @@ var Minecraft = /** @class */ (function () {
             return str;
         }
     };
-    Minecraft.prototype.summonBlockDisplay = function (Pos, Tags, identifier, Name, Properties, transformation, glowing, glow_color_override) {
-        return new BlockDisplay(this, Pos, Tags, identifier, Name, Properties, transformation, glowing, glow_color_override);
+    Minecraft.prototype.summonBlockDisplay = function (Pos, Tags, identifier, transformation, Name, Properties) {
+        return new BlockDisplay(this, Pos, Tags, identifier, transformation, Name, Properties);
+    };
+    Minecraft.prototype.summonItemDisplay = function (Pos, Tags, identifier, transformation) {
+        return new ItemDisplay(this, Pos, Tags, identifier, transformation);
+    };
+    Minecraft.prototype.summonTextDisplay = function (Pos, Tags, identifier, transformation) {
+        return new TextDisplay(this, Pos, Tags, identifier, transformation);
     };
     Minecraft.prototype.summonInteraction = function (Pos, Tags, identifier, width, height, response) {
         return new Interaction(this, Pos, Tags, identifier, width, height, response);
@@ -667,7 +693,7 @@ var Entity = /** @class */ (function () {
         }
         if (!this.nbt.Tags.includes("\"" + this.uuid + "\""))
             this.addTags(this.uuid);
-        if (!this.nbt.Tags.includes("\"FromServer"))
+        if (!this.nbt.Tags.includes("\"FromServer\""))
             this.addTags("FromServer");
         this.selector = "@e[nbt={Tags:[\"" + this.uuid + "\",\"FromServer\"]},limit=1]";
         this.Pos = Pos;
@@ -743,25 +769,71 @@ var Entity = /** @class */ (function () {
     };
     return Entity;
 }());
-var BlockDisplay = /** @class */ (function (_super) {
-    __extends(BlockDisplay, _super);
-    function BlockDisplay(parent, Pos, Tags, identifier, Name, Properties, transformation, glowing, glow_color_override) {
-        var _this = _super.call(this, parent, "minecraft:block_display", Pos, Tags, identifier) || this;
+//#region Displays
+var Display = /** @class */ (function (_super) {
+    __extends(Display, _super);
+    function Display(parent, entityName, Pos, Tags, identifier, transformation) {
+        var _this = _super.call(this, parent, entityName, Pos, Tags, identifier) || this;
         _this.actualTransformation = EmptyTransformationObj;
         _this.glowColorOverride = 16383998; // https://www.digminecraft.com/lists/dyed_armor_color_list_pc.php
-        _this.addTags("Displays", "BlockDisplays");
+        _this.addTags("Displays");
+        if (transformation)
+            _this.transformation = transformation;
+        return _this;
+    }
+    Object.defineProperty(Display.prototype, "transformation", {
+        get: function () { return this.actualTransformation; },
+        set: function (value) { this.actualTransformation = value; this.nbt.transformation = Minecraft.transformationToString(value); },
+        enumerable: false,
+        configurable: true
+    });
+    ;
+    ;
+    Object.defineProperty(Display.prototype, "glowing", {
+        get: function () { return this.nbt.Glowing == "true"; },
+        set: function (value) { this.nbt.Glowing = value.toString(); },
+        enumerable: false,
+        configurable: true
+    });
+    ;
+    ;
+    Object.defineProperty(Display.prototype, "glow_color_override", {
+        get: function () { return this.glowColorOverride; },
+        set: function (value) { this.glowColorOverride = value; this.nbt.glow_color_override = value.toString(); },
+        enumerable: false,
+        configurable: true
+    });
+    ;
+    ;
+    Display.prototype.animate = function (ticks) {
+        var _this = this;
+        return new Promise(function (resolve) {
+            var command = "data merge entity " + _this.selector;
+            var nbt = "{";
+            nbt += "start_interpolation:0,interpolation_duration:" + ticks;
+            if (_this.transformation != null)
+                nbt += ",transformation:" + Minecraft.transformationToString(_this.transformation);
+            nbt += "}";
+            command += " " + nbt;
+            _this.parent.cmd(command).then(function (out) { if (out.includes("Modified entity data of"))
+                resolve(true);
+            else
+                resolve(false); });
+        });
+    };
+    return Display;
+}(Entity));
+var BlockDisplay = /** @class */ (function (_super) {
+    __extends(BlockDisplay, _super);
+    function BlockDisplay(parent, Pos, Tags, identifier, transformation, Name, Properties) {
+        var _this = _super.call(this, parent, "minecraft:block_display", Pos, Tags, identifier, transformation) || this;
+        _this.addTags("BlockDisplays");
         _this.nbt.CustomName = "\"\\\"" + _this.uuid + "\\\"\"";
         _this.nbt.CustomNameVisible = "0";
         _this.blockState = { Name: "" };
         _this.blockStateName = Name;
         if (Properties)
             _this.blockStateProperties = Properties;
-        if (transformation)
-            _this.transformation = transformation;
-        if (glowing)
-            _this.glowing = glowing;
-        if (glow_color_override)
-            _this.glow_color_override = glow_color_override;
         return _this;
     }
     BlockDisplay.prototype.addTags = function () {
@@ -799,50 +871,10 @@ var BlockDisplay = /** @class */ (function (_super) {
     });
     ;
     ;
-    Object.defineProperty(BlockDisplay.prototype, "transformation", {
-        get: function () { return this.actualTransformation; },
-        set: function (value) { this.actualTransformation = value; this.nbt.transformation = Minecraft.transformationToString(value); },
-        enumerable: false,
-        configurable: true
-    });
-    ;
-    ;
-    Object.defineProperty(BlockDisplay.prototype, "glowing", {
-        get: function () { return this.nbt.Glowing == "true"; },
-        set: function (value) { this.nbt.Glowing = value.toString(); },
-        enumerable: false,
-        configurable: true
-    });
-    ;
-    ;
-    Object.defineProperty(BlockDisplay.prototype, "glow_color_override", {
-        get: function () { return this.glowColorOverride; },
-        set: function (value) { this.glowColorOverride = value; this.nbt.glow_color_override = value.toString(); },
-        enumerable: false,
-        configurable: true
-    });
-    ;
-    ;
-    BlockDisplay.prototype.animate = function (ticks) {
-        var _this = this;
-        return new Promise(function (resolve) {
-            _this.command = "data merge entity " + _this.selector;
-            var nbt = "{";
-            nbt += "start_interpolation:0,interpolation_duration:" + ticks;
-            if (_this.transformation != null)
-                nbt += ",transformation:" + Minecraft.transformationToString(_this.transformation);
-            nbt += "}";
-            _this.command += " " + nbt;
-            _this.parent.cmd(_this.command).then(function (out) { if (out.includes("Modified entity data of"))
-                resolve(true);
-            else
-                resolve(false); });
-        });
-    };
     BlockDisplay.fromJson = function (parent, json) {
         var blockState = Minecraft.parseNbt(json.nbt.block_state);
         var transformation = (json.nbt.transformation != null) ? Minecraft.parseNbt(json.nbt.transformation) : null;
-        var out = new BlockDisplay(parent, json.nbt.Pos.map(function (el) { return parseFloat(el); }), json.nbt.Tags.map(function (el) { return ((el.match(/(?<=").*(?=")/g) || [""])[0]); }), json.uuid, blockState.Name, blockState.Properties, transformation, (json.nbt.glowing != null) ? (json.nbt.glowing == "true") : null, (json.nbt.glow_color_override != null) ? parseInt(json.nbt.glow_color_override) : null);
+        var out = new BlockDisplay(parent, json.nbt.Pos.map(function (el) { return parseFloat(el); }), json.nbt.Tags.map(function (el) { return ((el.match(/(?<=").*(?=")/g) || [""])[0]); }), json.uuid, transformation, blockState.Name, blockState.Properties);
         out.nbt = json.nbt;
         return out;
     };
@@ -856,13 +888,81 @@ var BlockDisplay = /** @class */ (function (_super) {
         }
     };
     return BlockDisplay;
-}(Entity));
+}(Display));
+var ItemDisplay = /** @class */ (function (_super) {
+    __extends(ItemDisplay, _super);
+    function ItemDisplay(parent, Pos, Tags, identifier, transformation) {
+        var _this = _super.call(this, parent, "minecraft:item_display", Pos, Tags, identifier, transformation) || this;
+        _this.addTags("ItemDisplays");
+        _this.nbt.CustomName = "\"\\\"" + _this.uuid + "\\\"\"";
+        _this.nbt.CustomNameVisible = "0";
+        return _this;
+    }
+    ItemDisplay.prototype.addTags = function () {
+        var tags = [];
+        for (var _i = 0; _i < arguments.length; _i++) {
+            tags[_i] = arguments[_i];
+        }
+        _super.prototype.addTags.apply(this, tags);
+        return this;
+    };
+    ItemDisplay.fromJson = function (parent, json) {
+        var transformation = (json.nbt.transformation != null) ? Minecraft.parseNbt(json.nbt.transformation) : null;
+        var out = new ItemDisplay(parent, json.nbt.Pos.map(function (el) { return parseFloat(el); }), json.nbt.Tags.map(function (el) { return ((el.match(/(?<=").*(?=")/g) || [""])[0]); }), json.uuid, transformation);
+        out.nbt = json.nbt;
+        return out;
+    };
+    ItemDisplay.fromFile = function (parent, name) {
+        try {
+            return ItemDisplay.fromJson(parent, JSON.parse(fs.readFileSync(__dirname + "/Saves/" + name + ".json").toString()));
+        }
+        catch (err) {
+            //console.log(err);
+            return undefined;
+        }
+    };
+    return ItemDisplay;
+}(Display));
+var TextDisplay = /** @class */ (function (_super) {
+    __extends(TextDisplay, _super);
+    function TextDisplay(parent, Pos, Tags, identifier, transformation) {
+        var _this = _super.call(this, parent, "minecraft:text_display", Pos, Tags, identifier, transformation) || this;
+        _this.addTags("TextDisplays");
+        _this.nbt.CustomName = "\"\\\"" + _this.uuid + "\\\"\"";
+        _this.nbt.CustomNameVisible = "0";
+        return _this;
+    }
+    TextDisplay.prototype.addTags = function () {
+        var tags = [];
+        for (var _i = 0; _i < arguments.length; _i++) {
+            tags[_i] = arguments[_i];
+        }
+        _super.prototype.addTags.apply(this, tags);
+        return this;
+    };
+    TextDisplay.fromJson = function (parent, json) {
+        var transformation = (json.nbt.transformation != null) ? Minecraft.parseNbt(json.nbt.transformation) : null;
+        var out = new TextDisplay(parent, json.nbt.Pos.map(function (el) { return parseFloat(el); }), json.nbt.Tags.map(function (el) { return ((el.match(/(?<=").*(?=")/g) || [""])[0]); }), json.uuid, transformation);
+        out.nbt = json.nbt;
+        return out;
+    };
+    TextDisplay.fromFile = function (parent, name) {
+        try {
+            return TextDisplay.fromJson(parent, JSON.parse(fs.readFileSync(__dirname + "/Saves/" + name + ".json").toString()));
+        }
+        catch (err) {
+            //console.log(err);
+            return undefined;
+        }
+    };
+    return TextDisplay;
+}(Display));
+//#endregion Displays
+//#region Interaction
 var Interaction = /** @class */ (function (_super) {
     __extends(Interaction, _super);
     function Interaction(parent, Pos, Tags, identifier, width, height, response) {
         var _this = _super.call(this, parent, "minecraft:interaction", Pos, Tags, identifier) || this;
-        _this.ignoreNextInteraction = false;
-        _this.ignoreNextAttack = false;
         _this.addTags("Interactions");
         _this.nbt.CustomName = "\"\\\"" + _this.uuid + "\\\"\"";
         _this.nbt.CustomNameVisible = "0";
@@ -903,60 +1003,10 @@ var Interaction = /** @class */ (function (_super) {
     });
     ;
     ;
-    Interaction.prototype.build = function () {
-        this.start();
-        return _super.prototype.build.call(this);
-    };
-    Interaction.prototype.kill = function () {
-        if (this.intervalId != null) {
-            clearInterval(this.intervalId);
-            this.intervalId = undefined;
-        }
-        return _super.prototype.kill.call(this);
-    };
-    Interaction.prototype.start = function () {
-        var _this = this;
-        this.intervalId = setInterval(function () {
-            _this.parent.cmd("data get entity " + _this.selector).then(function (out) {
-                if (out != "No entity was found") {
-                    var match = out.match(/^\S+ has the following entity data: {.*}$/g);
-                    if (match != null) {
-                        var nbt = Minecraft.parseNbt(out.match(/(?<=^\S+ has the following entity data: ){.*}$/g)[0]);
-                        if (nbt.interaction != null) {
-                            if (_this.ignoreNextInteraction) {
-                                _this.ignoreNextInteraction = false;
-                                return;
-                            } //buffers one detection to reset
-                            else {
-                                _this.ignoreNextInteraction = true;
-                            }
-                            //console.log(Colors.Fgra+"Interact: "+Colors.Fgre+this.uuid+Colors.R)
-                            //console.log(nbt.interaction);
-                            _this.parent.cmd("data remove entity " + _this.selector + " interaction");
-                            if (_this.onInteraction != null)
-                                _this.onInteraction(nbt);
-                        }
-                        else if (nbt.attack != null) {
-                            if (_this.ignoreNextAttack) {
-                                _this.ignoreNextAttack = false;
-                                return;
-                            } //buffers one detection to reset
-                            else {
-                                _this.ignoreNextAttack = true;
-                            }
-                            //console.log(Colors.Fgra+"Attack: "+Colors.Fgre+this.uuid+Colors.R)
-                            //console.log(nbt.attack);
-                            _this.parent.cmd("data remove entity " + _this.selector + " attack");
-                            if (_this.onAttack != null)
-                                _this.onAttack(nbt);
-                        }
-                    }
-                }
-            });
-        }, 1000 / 20); //one tick
-    };
     Interaction.fromJson = function (parent, json) {
-        return new Interaction(parent, json.nbt.Pos.map(function (el) { return parseFloat(el); }), json.nbt.Tags.map(function (el) { return ((el.match(/(?<=").*(?=")/g) || [""])[0]); }), json.uuid, parseFloat(json.nbt.width), parseFloat(json.nbt.height), json.nbt.response == "true");
+        var out = new Interaction(parent, json.nbt.Pos.map(function (el) { return parseFloat(el); }), json.nbt.Tags.map(function (el) { return ((el.match(/(?<=").*(?=")/g) || [""])[0]); }), json.uuid, parseFloat(json.nbt.width), parseFloat(json.nbt.height), json.nbt.response == "true");
+        out.nbt = json.nbt;
+        return out;
     };
     Interaction.fromFile = function (parent, name) {
         try {
@@ -969,6 +1019,58 @@ var Interaction = /** @class */ (function (_super) {
     };
     return Interaction;
 }(Entity));
+function registerInteractionDetecter(mine, Tags, onInteraction) {
+    var lastInteraction = (new Date()).getTime();
+    return setInterval(function () {
+        //var start:number=(new Date()).getTime();
+        mine.cmd("data get entity @e[type=interaction,nbt={Tags:[" + Tags.map(function (el) { return "\"" + el + "\""; }).join(",") + ",\"Interactions\",\"FromServer\"],interaction:{}},limit=1]").then(function (out) {
+            //console.log(Colors.Fgra+"Time: "+Colors.Fy+((new Date()).getTime()-start)+Colors.Fgra+"."+Colors.R)
+            if (out != "No entity was found") {
+                var match = out.match(/^\S+ has the following entity data: {.*}$/g);
+                if (match != null) {
+                    var nbt = Minecraft.parseNbt(out.match(/(?<=^\S+ has the following entity data: ){.*}$/g)[0]);
+                    if (nbt.interaction != null) {
+                        var time = (new Date()).getTime();
+                        if ((time - lastInteraction) < 100)
+                            return; //buffers one detection to reset
+                        lastInteraction = time;
+                        var uuid = nbt.Tags.filter(function (el) { return (el.match(/\w{8}-\w{4}-\w{4}-\w{4}-\w{12}/g) != null); })[0];
+                        //console.log(Colors.Fgra+"Interact: "+Colors.Fgre+uuid+Colors.R);
+                        mine.cmd("data remove entity @e[nbt={Tags:[\"" + uuid + "\"]},limit=1] interaction");
+                        Object.values(mine.playerData);
+                        onInteraction(nbt);
+                    }
+                }
+            }
+        });
+    }, 1000 / 20); //one tick
+}
+function registerAttackDetecter(mine, Tags, onAttack) {
+    var lastInteraction = (new Date()).getTime();
+    return setInterval(function () {
+        //var start:number=(new Date()).getTime();
+        mine.cmd("data get entity @e[type=interaction,nbt={Tags:[" + Tags.map(function (el) { return "\"" + el + "\""; }).join(",") + ",\"Interactions\",\"FromServer\"],attack:{}},limit=1]").then(function (out) {
+            //console.log(Colors.Fgra+"Time: "+Colors.Fy+((new Date()).getTime()-start)+Colors.Fgra+"."+Colors.R)
+            if (out != "No entity was found") {
+                var match = out.match(/^\S+ has the following entity data: {.*}$/g);
+                if (match != null) {
+                    var nbt = Minecraft.parseNbt(out.match(/(?<=^\S+ has the following entity data: ){.*}$/g)[0]);
+                    if (nbt.attack != null) {
+                        var time = (new Date()).getTime();
+                        if ((time - lastInteraction) < 100)
+                            return; //buffers one detection to reset
+                        lastInteraction = time;
+                        var uuid = nbt.Tags.filter(function (el) { return (el.match(/\w{8}-\w{4}-\w{4}-\w{4}-\w{12}/g) != null); })[0];
+                        //console.log(Colors.Fgra+"Interact: "+Colors.Fgre+uuid+Colors.R);
+                        mine.cmd("data remove entity @e[nbt={Tags:[\"" + uuid + "\"]},limit=1] attack");
+                        onAttack(nbt);
+                    }
+                }
+            }
+        });
+    }, 1000 / 20); //one tick
+}
+//#endregion Interaction
 var mine = new Minecraft();
 /*
 mine.Emitter.on("playerJoined",(e:{name:string,preventDefault:()=>void})=>{
@@ -976,8 +1078,7 @@ mine.Emitter.on("playerJoined",(e:{name:string,preventDefault:()=>void})=>{
 });
 mine.Emitter.on("playerLeft",(e:{name:string,preventDefault:()=>void})=>{
     mine.cmd("deop "+e.name).then((out:string)=>{console.log(Colors.Fgra+out+Colors.R);})
-});
-*/
+});*/
 mine.Emitter.on("playerChat", function (e) { return __awaiter(void 0, void 0, void 0, function () {
     var _a, _b, _c;
     return __generator(this, function (_d) {
@@ -1014,168 +1115,9 @@ mine.Emitter.on("playerCmdOut", function (e) { return __awaiter(void 0, void 0, 
         }
     });
 }); });
-//#region door
-var door = undefined;
-var doorOpened = false;
-mine.Emitter.on("serverStart", function (e) {
-    var lst = [
-        BlockDisplay.fromFile(mine, "Door/1"),
-        BlockDisplay.fromFile(mine, "Door/2"),
-        BlockDisplay.fromFile(mine, "Door/3"),
-        BlockDisplay.fromFile(mine, "Door/4"),
-        Interaction.fromFile(mine, "Door/int0"),
-        Interaction.fromFile(mine, "Door/int1")
-    ];
-    if (lst[0] == null || lst[1] == null || lst[2] == null || lst[3] == null || lst[4] == null || lst[5] == null)
-        return;
-    door = [lst[0], lst[1], lst[2], lst[3], lst[4], lst[5]];
-    for (var i = 4; i < door.length; i++) {
-        var inter = door[i];
-        inter.start();
-        inter.onInteraction = doorToggle;
-        //inter.onAttack=doorKill;
-    }
-});
-function SaveDoor() {
-    if (door == null)
-        return;
-    if (!fs.existsSync(__dirname + "/Saves/Door"))
-        fs.mkdirSync(__dirname + "/Saves/Door");
-    door[0].savetoFile("Door/1");
-    door[1].savetoFile("Door/2");
-    door[2].savetoFile("Door/3");
-    door[3].savetoFile("Door/4");
-    door[4].savetoFile("Door/int0");
-    door[5].savetoFile("Door/int1");
-}
-function buildDoor() {
-    if (door == null)
-        return;
-    for (var i = 0; i < door.length; i++) {
-        door[i].build();
-    }
-    for (var i = 4; i < door.length; i++) {
-        var inter = door[i];
-        inter.start();
-        inter.onInteraction = doorToggle;
-        //inter.onAttack=doorKill;
-    }
-    var cmd = "fill " + door[0].Pos.join(" ") + " " + door[3].Pos.join(" ") + " barrier";
-    mine.cmd(cmd);
-}
-function animateDoor() {
-    if (door == null)
-        return;
-    door[0].animate(10);
-    door[1].animate(10);
-    door[2].animate(10);
-    door[3].animate(10);
-}
-function doorOpen() {
-    if (door == null)
-        return;
-    doorOpened = true;
-    //door1
-    door[0].transformation.left_rotation = [0, Math.sqrt(0.5), 0, Math.sqrt(0.5)];
-    door[0].transformation.translation = [0.188, 0, 1];
-    door[1].transformation.left_rotation = [0, Math.sqrt(0.5), 0, Math.sqrt(0.5)];
-    door[1].transformation.translation = [0.188, 0, 1];
-    //door2
-    door[2].transformation.left_rotation = [0, -Math.sqrt(0.5), 0, Math.sqrt(0.5)];
-    door[2].transformation.translation = [0.813, 0, 1];
-    door[3].transformation.left_rotation = [0, -Math.sqrt(0.5), 0, Math.sqrt(0.5)];
-    door[3].transformation.translation = [0.813, 0, 1];
-    animateDoor();
-    SaveDoor();
-    var cmd = "fill " + door[0].Pos.join(" ") + " " + door[3].Pos.join(" ") + " air";
-    mine.cmd(cmd);
-}
-function doorClose() {
-    if (door == null)
-        return;
-    doorOpened = false;
-    //door1
-    door[0].transformation.left_rotation = [0, 0, 0, 1];
-    door[0].transformation.translation = [0, 0, 1];
-    door[1].transformation.left_rotation = [0, 0, 0, 1];
-    door[1].transformation.translation = [0, 0, 1];
-    //door2
-    door[2].transformation.left_rotation = [0, 0, 0, 1];
-    door[2].transformation.translation = [1, 0, 1];
-    door[3].transformation.left_rotation = [0, 0, 0, 1];
-    door[3].transformation.translation = [1, 0, 1];
-    animateDoor();
-    SaveDoor();
-    var cmd = "fill " + door[0].Pos.join(" ") + " " + door[3].Pos.join(" ") + " barrier";
-    mine.cmd(cmd);
-}
-function doorKill() {
-    if (door == null)
-        return;
-    for (var i = 0; i < door.length; i++) {
-        door[i].kill();
-    }
-    fs.rmSync(__dirname + "/Saves/Door/1.json");
-    fs.rmSync(__dirname + "/Saves/Door/2.json");
-    fs.rmSync(__dirname + "/Saves/Door/3.json");
-    fs.rmSync(__dirname + "/Saves/Door/4.json");
-    fs.rmSync(__dirname + "/Saves/Door/int0.json");
-    fs.rmSync(__dirname + "/Saves/Door/int1.json");
-    fs.rmdirSync(__dirname + "/Saves/Door");
-    var cmd = "fill " + door[0].Pos.join(" ") + " " + door[3].Pos.join(" ") + " air";
-    mine.cmd(cmd);
-}
-function doorToggle() { if (doorOpened)
-    doorClose();
-else
-    doorOpen(); }
-mine.Emitter.on("playerChat", function (e) { return __awaiter(void 0, void 0, void 0, function () {
-    var playerPos;
-    return __generator(this, function (_a) {
-        switch (_a.label) {
-            case 0:
-                if (!(e.chat == "summonDoor")) return [3 /*break*/, 2];
-                e.preventDefault();
-                return [4 /*yield*/, mine.playerData[e.name].updatePos()];
-            case 1:
-                playerPos = (_a.sent());
-                door = [
-                    mine.summonBlockDisplay([playerPos[0], playerPos[1], playerPos[2]], ["Door"], null, "minecraft:dark_oak_door", { facing: "east", half: "lower", hinge: "left", open: "false" }, __assign(__assign({}, EmptyTransformationObj), { translation: [0, 0, 1], right_rotation: [0, Math.sqrt(0.5), 0, Math.sqrt(0.5)] })),
-                    mine.summonBlockDisplay([playerPos[0], playerPos[1] + 1, playerPos[2]], ["Door"], null, "minecraft:dark_oak_door", { facing: "east", half: "upper", hinge: "left", open: "false" }, __assign(__assign({}, EmptyTransformationObj), { translation: [0, 0, 1], right_rotation: [0, Math.sqrt(0.5), 0, Math.sqrt(0.5)] })),
-                    mine.summonBlockDisplay([playerPos[0] + 1, playerPos[1], playerPos[2]], ["Door"], null, "minecraft:dark_oak_door", { facing: "south", half: "lower", hinge: "right", open: "false" }, __assign(__assign({}, EmptyTransformationObj), { translation: [1, 0, 1], right_rotation: [0, 1, 0, 0] })),
-                    mine.summonBlockDisplay([playerPos[0] + 1, playerPos[1] + 1, playerPos[2]], ["Door"], null, "minecraft:dark_oak_door", { facing: "south", half: "upper", hinge: "right", open: "false" }, __assign(__assign({}, EmptyTransformationObj), { translation: [1, 0, 1], right_rotation: [0, 1, 0, 0] })),
-                    mine.summonInteraction([playerPos[0] + 0.5, playerPos[1], playerPos[2] + 0.5005], ["Door"], null, 1.01, 2, true),
-                    mine.summonInteraction([playerPos[0] + 1.5, playerPos[1], playerPos[2] + 0.5005], ["Door"], null, 1.01, 2, true)
-                ];
-                buildDoor();
-                SaveDoor();
-                return [3 /*break*/, 3];
-            case 2:
-                if (e.chat == "open" && door != null) {
-                    e.preventDefault();
-                    if (!doorOpened)
-                        doorOpen();
-                }
-                else if (e.chat == "close" && door != null) {
-                    e.preventDefault();
-                    if (doorOpened)
-                        doorClose();
-                }
-                else if (e.chat == "toggle" && door != null) {
-                    e.preventDefault();
-                    doorToggle();
-                }
-                else if (e.chat == "killDoor" && door != null) {
-                    e.preventDefault();
-                    doorKill();
-                }
-                _a.label = 3;
-            case 3: return [2 /*return*/];
-        }
-    });
-}); });
-//#endregion
-//#region BlockDisplays
+var Quat90 = AxAngToQuat([0, 1, 0], Math.PI / 2);
+var QuatNeg90 = AxAngToQuat([0, 1, 0], -Math.PI / 2);
+var Quat180 = AxAngToQuat([0, 1, 0], Math.PI);
 function relativePos(pos, relativePos) {
     return __awaiter(this, void 0, void 0, function () {
         var _this = this;
@@ -1207,144 +1149,450 @@ function relativePos(pos, relativePos) {
         });
     });
 }
-var displays;
-var displayIndex;
-function saveDisplays() {
-    fs.writeFileSync(__dirname + "/Saves/Displays.json", JSON.stringify({ "index": displayIndex, "displays": displays.map(function (el) { return el.toJson(); }) }));
-}
-mine.Emitter.on("serverStart", function (e) {
+var Door = /** @class */ (function () {
+    function Door() {
+    }
+    Door.read = function () {
+        var lst = [
+            BlockDisplay.fromFile(mine, "Door/1"), BlockDisplay.fromFile(mine, "Door/2"),
+            BlockDisplay.fromFile(mine, "Door/3"), BlockDisplay.fromFile(mine, "Door/4")
+        ];
+        for (var i = 0; i < 14; i++) {
+            lst[i + 4] = Interaction.fromFile(mine, "Door/int" + i);
+        }
+        if (lst[0] == null || lst[1] == null ||
+            lst[2] == null || lst[3] == null ||
+            lst[4] == null || lst[5] == null ||
+            lst[6] == null || lst[7] == null ||
+            lst[8] == null || lst[9] == null ||
+            lst[10] == null || lst[11] == null ||
+            lst[12] == null || lst[13] == null ||
+            lst[14] == null || lst[15] == null ||
+            lst[16] == null || lst[17] == null)
+            return;
+        Door.door = lst;
+        registerInteractionDetecter(mine, ["Door"], Door.toggle);
+        registerAttackDetecter(mine, ["Door"], Door.kill);
+    };
+    Door.summon = function (playerPos) {
+        return __awaiter(this, void 0, void 0, function () {
+            return __generator(this, function (_a) {
+                Door.door = [
+                    mine.summonBlockDisplay([playerPos[0], playerPos[1], playerPos[2]], ["Door"], null, __assign(__assign({}, EmptyTransformationObj), { translation: [0, 0, 1], right_rotation: Quat90 }), "minecraft:spruce_door", { facing: "east", half: "lower", hinge: "left", open: "false" }),
+                    mine.summonBlockDisplay([playerPos[0], playerPos[1] + 1, playerPos[2]], ["Door"], null, __assign(__assign({}, EmptyTransformationObj), { translation: [0, 0, 1], right_rotation: Quat90 }), "minecraft:spruce_door", { facing: "east", half: "upper", hinge: "left", open: "false" }),
+                    mine.summonBlockDisplay([playerPos[0] + 1, playerPos[1], playerPos[2]], ["Door"], null, __assign(__assign({}, EmptyTransformationObj), { translation: [1, 0, 1], right_rotation: Quat180 }), "minecraft:spruce_door", { facing: "south", half: "lower", hinge: "right", open: "false" }),
+                    mine.summonBlockDisplay([playerPos[0] + 1, playerPos[1] + 1, playerPos[2]], ["Door"], null, __assign(__assign({}, EmptyTransformationObj), { translation: [1, 0, 1], right_rotation: Quat180 }), "minecraft:spruce_door", { facing: "south", half: "upper", hinge: "right", open: "false" }),
+                    mine.summonInteraction([playerPos[0] + 3 / 32, playerPos[1], playerPos[2] + 29 / 32 + 0.0005], ["Door"], null, 3 / 16 + 0.001, 2, true),
+                    mine.summonInteraction([playerPos[0] + 9 / 32, playerPos[1], playerPos[2] + 29 / 32 + 0.0005], ["Door"], null, 3 / 16 + 0.001, 2, true),
+                    mine.summonInteraction([playerPos[0] + 15 / 32, playerPos[1], playerPos[2] + 29 / 32 + 0.0005], ["Door"], null, 3 / 16 + 0.001, 2, true),
+                    mine.summonInteraction([playerPos[0] + 21 / 32, playerPos[1], playerPos[2] + 29 / 32 + 0.0005], ["Door"], null, 3 / 16 + 0.001, 2, true),
+                    mine.summonInteraction([playerPos[0] + 27 / 32, playerPos[1], playerPos[2] + 29 / 32 + 0.0005], ["Door"], null, 3 / 16 + 0.001, 2, true),
+                    mine.summonInteraction([playerPos[0] + 31 / 32, playerPos[1], playerPos[2] + 31 / 32 + 0.0005], ["Door"], null, 1 / 16 + 0.001, 2, true),
+                    mine.summonInteraction([playerPos[0] + 31 / 32, playerPos[1], playerPos[2] + 27 / 32 + 0.0005], ["Door"], null, 1 / 16 + 0.001, 2, true),
+                    mine.summonInteraction([playerPos[0] + 35 / 32, playerPos[1], playerPos[2] + 29 / 32 + 0.0005], ["Door"], null, 3 / 16 + 0.001, 2, true),
+                    mine.summonInteraction([playerPos[0] + 41 / 32, playerPos[1], playerPos[2] + 29 / 32 + 0.0005], ["Door"], null, 3 / 16 + 0.001, 2, true),
+                    mine.summonInteraction([playerPos[0] + 47 / 32, playerPos[1], playerPos[2] + 29 / 32 + 0.0005], ["Door"], null, 3 / 16 + 0.001, 2, true),
+                    mine.summonInteraction([playerPos[0] + 53 / 32, playerPos[1], playerPos[2] + 29 / 32 + 0.0005], ["Door"], null, 3 / 16 + 0.001, 2, true),
+                    mine.summonInteraction([playerPos[0] + 59 / 32, playerPos[1], playerPos[2] + 29 / 32 + 0.0005], ["Door"], null, 3 / 16 + 0.001, 2, true),
+                    mine.summonInteraction([playerPos[0] + 63 / 32, playerPos[1], playerPos[2] + 31 / 32 + 0.0005], ["Door"], null, 1 / 16 + 0.001, 2, true),
+                    mine.summonInteraction([playerPos[0] + 63 / 32, playerPos[1], playerPos[2] + 27 / 32 + 0.0005], ["Door"], null, 1 / 16 + 0.001, 2, true)
+                ];
+                Door.build();
+                Door.doorOpened = false;
+                return [2 /*return*/];
+            });
+        });
+    };
+    Door.build = function () {
+        var door = Door.door;
+        if (door == null)
+            return;
+        for (var i = 0; i < door.length; i++) {
+            door[i].build();
+        }
+        mine.cmd("fill " + door[0].Pos.join(" ") + " " + door[3].Pos.join(" ") + " minecraft:barrier");
+        registerInteractionDetecter(mine, ["Door"], Door.toggle);
+        registerAttackDetecter(mine, ["Door"], Door.kill);
+        this.save();
+    };
+    Door.save = function () {
+        var door = Door.door;
+        if (door == null)
+            return;
+        if (!fs.existsSync(__dirname + "/Saves/Door"))
+            fs.mkdirSync(__dirname + "/Saves/Door");
+        door[0].savetoFile("Door/1");
+        door[1].savetoFile("Door/2");
+        door[2].savetoFile("Door/3");
+        door[3].savetoFile("Door/4");
+        door[4].savetoFile("Door/int0");
+        door[5].savetoFile("Door/int1");
+        door[6].savetoFile("Door/int2");
+        door[7].savetoFile("Door/int3");
+        door[8].savetoFile("Door/int4");
+        door[9].savetoFile("Door/int5");
+        door[10].savetoFile("Door/int6");
+        door[11].savetoFile("Door/int7");
+        door[12].savetoFile("Door/int8");
+        door[13].savetoFile("Door/int9");
+        door[14].savetoFile("Door/int10");
+        door[15].savetoFile("Door/int11");
+        door[16].savetoFile("Door/int12");
+        door[17].savetoFile("Door/int13");
+    };
+    Door.animate = function () {
+        var door = Door.door;
+        if (door == null)
+            return;
+        var animationSpeed = Door.animationSpeed;
+        door[0].animate(animationSpeed);
+        door[1].animate(animationSpeed);
+        door[2].animate(animationSpeed);
+        door[3].animate(animationSpeed);
+    };
+    //#region open/close
+    Door.open = function () {
+        var door = Door.door;
+        if (door == null || Door.doorOpened == true)
+            return;
+        Door.doorOpened = true;
+        //door1
+        door[0].transformation.left_rotation = Quat90;
+        door[0].transformation.translation = [3 / 16, 0, 1];
+        door[1].transformation.left_rotation = Quat90;
+        door[1].transformation.translation = [3 / 16, 0, 1];
+        //door2
+        door[2].transformation.left_rotation = QuatNeg90;
+        door[2].transformation.translation = [1 - 3 / 16, 0, 1];
+        door[3].transformation.left_rotation = QuatNeg90;
+        door[3].transformation.translation = [1 - 3 / 16, 0, 1];
+        Door.animate();
+        Door.save();
+        var playerPos = door[0].Pos;
+        door[4].Pos = [playerPos[0] + 3 / 32, playerPos[1], playerPos[2] + 29 / 32];
+        door[5].Pos = [playerPos[0] + 3 / 32, playerPos[1], playerPos[2] + 23 / 32];
+        door[6].Pos = [playerPos[0] + 3 / 32, playerPos[1], playerPos[2] + 17 / 32];
+        door[7].Pos = [playerPos[0] + 3 / 32, playerPos[1], playerPos[2] + 11 / 32];
+        door[8].Pos = [playerPos[0] + 3 / 32, playerPos[1], playerPos[2] + 3 / 32];
+        door[9].Pos = [playerPos[0] + 1 / 64, playerPos[1], playerPos[2] + 7 / 32];
+        door[10].Pos = [playerPos[0] + 5 / 32, playerPos[1], playerPos[2] + 7 / 32];
+        door[11].Pos = [playerPos[0] + 61 / 32, playerPos[1], playerPos[2] + 29 / 32];
+        door[12].Pos = [playerPos[0] + 61 / 32, playerPos[1], playerPos[2] + 23 / 32];
+        door[13].Pos = [playerPos[0] + 61 / 32, playerPos[1], playerPos[2] + 17 / 32];
+        door[14].Pos = [playerPos[0] + 61 / 32, playerPos[1], playerPos[2] + 11 / 32];
+        door[15].Pos = [playerPos[0] + 61 / 32, playerPos[1], playerPos[2] + 3 / 32];
+        door[16].Pos = [playerPos[0] + 63 / 32, playerPos[1], playerPos[2] + 7 / 32];
+        door[17].Pos = [playerPos[0] + 59 / 32, playerPos[1], playerPos[2] + 7 / 32];
+        for (var i = 4; i < door.length; i++) {
+            door[i].update();
+        }
+        mine.cmd("fill " + door[0].Pos.join(" ") + " " + door[3].Pos.join(" ") + " minecraft:air");
+    };
+    Door.close = function () {
+        var door = Door.door;
+        if (door == null || Door.doorOpened == false)
+            return;
+        Door.doorOpened = false;
+        //door1
+        door[0].transformation.left_rotation = QuatIdentity;
+        door[0].transformation.translation = [0, 0, 1];
+        door[1].transformation.left_rotation = QuatIdentity;
+        door[1].transformation.translation = [0, 0, 1];
+        //door2
+        door[2].transformation.left_rotation = QuatIdentity;
+        door[2].transformation.translation = [1, 0, 1];
+        door[3].transformation.left_rotation = QuatIdentity;
+        door[3].transformation.translation = [1, 0, 1];
+        Door.animate();
+        Door.save();
+        var playerPos = door[0].Pos;
+        door[4].Pos = [playerPos[0] + 3 / 32, playerPos[1], playerPos[2] + 29 / 32 + 0.0005];
+        door[5].Pos = [playerPos[0] + 9 / 32, playerPos[1], playerPos[2] + 29 / 32 + 0.0005];
+        door[6].Pos = [playerPos[0] + 15 / 32, playerPos[1], playerPos[2] + 29 / 32 + 0.0005];
+        door[7].Pos = [playerPos[0] + 21 / 32, playerPos[1], playerPos[2] + 29 / 32 + 0.0005];
+        door[8].Pos = [playerPos[0] + 27 / 32, playerPos[1], playerPos[2] + 29 / 32 + 0.0005];
+        door[9].Pos = [playerPos[0] + 31 / 32, playerPos[1], playerPos[2] + 31 / 32 + 0.0005];
+        door[10].Pos = [playerPos[0] + 31 / 32, playerPos[1], playerPos[2] + 27 / 32 + 0.0005];
+        door[11].Pos = [playerPos[0] + 35 / 32, playerPos[1], playerPos[2] + 29 / 32 + 0.0005];
+        door[12].Pos = [playerPos[0] + 41 / 32, playerPos[1], playerPos[2] + 29 / 32 + 0.0005];
+        door[13].Pos = [playerPos[0] + 47 / 32, playerPos[1], playerPos[2] + 29 / 32 + 0.0005];
+        door[14].Pos = [playerPos[0] + 53 / 32, playerPos[1], playerPos[2] + 29 / 32 + 0.0005];
+        door[15].Pos = [playerPos[0] + 59 / 32, playerPos[1], playerPos[2] + 29 / 32 + 0.0005];
+        door[16].Pos = [playerPos[0] + 63 / 32, playerPos[1], playerPos[2] + 31 / 32 + 0.0005];
+        door[17].Pos = [playerPos[0] + 63 / 32, playerPos[1], playerPos[2] + 27 / 32 + 0.0005];
+        for (var i = 4; i < door.length; i++) {
+            door[i].update();
+        }
+        mine.cmd("fill " + door[0].Pos.join(" ") + " " + door[3].Pos.join(" ") + " minecraft:barrier");
+    };
+    Door.toggle = function () { if (Door.doorOpened)
+        Door.close();
+    else
+        Door.open(); };
+    //#endregion open/close
+    Door.kill = function () {
+        var door = Door.door;
+        if (door == null)
+            return;
+        mine.cmd("fill " + door[0].Pos.join(" ") + " " + door[3].Pos.join(" ") + " minecraft:air");
+        mine.cmd("kill @e[nbt={Tags:[\"FromServer\",\"Door\"]}]").then(function (out) { });
+        door = undefined;
+        fs.rmSync(__dirname + "/Saves/Door/1.json");
+        fs.rmSync(__dirname + "/Saves/Door/2.json");
+        fs.rmSync(__dirname + "/Saves/Door/3.json");
+        fs.rmSync(__dirname + "/Saves/Door/4.json");
+        fs.rmSync(__dirname + "/Saves/Door/int0.json");
+        fs.rmSync(__dirname + "/Saves/Door/int1.json");
+        fs.rmSync(__dirname + "/Saves/Door/int2.json");
+        fs.rmSync(__dirname + "/Saves/Door/int3.json");
+        fs.rmSync(__dirname + "/Saves/Door/int4.json");
+        fs.rmSync(__dirname + "/Saves/Door/int5.json");
+        fs.rmSync(__dirname + "/Saves/Door/int6.json");
+        fs.rmSync(__dirname + "/Saves/Door/int7.json");
+        fs.rmSync(__dirname + "/Saves/Door/int8.json");
+        fs.rmSync(__dirname + "/Saves/Door/int9.json");
+        fs.rmSync(__dirname + "/Saves/Door/int10.json");
+        fs.rmSync(__dirname + "/Saves/Door/int11.json");
+        fs.rmSync(__dirname + "/Saves/Door/int12.json");
+        fs.rmSync(__dirname + "/Saves/Door/int13.json");
+        fs.rmdirSync(__dirname + "/Saves/Door");
+        Door.doorOpened = false;
+    };
+    Door.door = undefined;
+    Door.doorOpened = false;
+    Door.animationSpeed = 5;
+    return Door;
+}());
+//#region blockDisplays
+var blockDisplays;
+var blockDisplayIndex;
+function blockDisplaysRead() {
     try {
         var data = JSON.parse(fs.readFileSync(__dirname + "/Saves/Displays.json").toString());
-        displays = data.displays.map(function (el) { return BlockDisplay.fromJson(mine, el); });
-        displayIndex = data.index;
+        blockDisplays = data.displays.map(function (el) { return BlockDisplay.fromJson(mine, el); });
+        blockDisplayIndex = data.index;
     }
-    catch (error) {
-        displays = [];
-        displayIndex = -1;
+    catch (err) {
+        blockDisplays = [];
+        blockDisplayIndex = -1;
     }
+}
+function blockDisplaysSave() {
+    fs.writeFileSync(__dirname + "/Saves/Displays.json", JSON.stringify({ "index": blockDisplayIndex, "displays": blockDisplays.map(function (el) { return el.toJson(); }) }));
+}
+function blockDisplaysKillAll() {
+    mine.cmd("kill @e[nbt={Tags:[\"FromServer\",\"BlockDisplays\",\"Tests\"]}]").then(function (out) { });
+    blockDisplays = [];
+    blockDisplayIndex = -1;
+    blockDisplaysSave();
+}
+function blockDisplaySummon(pos) {
+    if (blockDisplays.length != 0) {
+        var display = blockDisplays[blockDisplayIndex];
+        display.glowing = false;
+        display.update();
+    }
+    blockDisplays.push(mine.summonBlockDisplay(pos, null, null, EmptyTransformationObj, "minecraft:diamond_block", null));
+    var display = blockDisplays[blockDisplays.length - 1];
+    display.addTags("Tests").glowing = true;
+    display.build();
+    blockDisplayIndex = blockDisplays.length - 1;
+    blockDisplaysSave();
+}
+function blockDisplayKill() {
+    if (blockDisplayIndex == -1)
+        return;
+    var display = blockDisplays[blockDisplayIndex];
+    if (display == null)
+        return;
+    display.kill();
+    delete blockDisplays[blockDisplayIndex];
+    blockDisplays = blockDisplays.filter(function (el) { return el != null; });
+    if (blockDisplays.length > 0) {
+        var display = blockDisplays[blockDisplays.length - 1];
+        display.glowing = true;
+        display.update();
+        blockDisplayIndex = blockDisplays.length - 1;
+    }
+    else
+        blockDisplayIndex = -1;
+    blockDisplaysSave();
+}
+function blockDisplayRotate() {
+    if (blockDisplayIndex == -1)
+        return;
+    var display = blockDisplays[blockDisplayIndex];
+    if (display == null)
+        return;
+    display.transformation.left_rotation = AxAngToQuat([0, 1, 0], Math.PI / 4);
+    display.animate(20);
+    blockDisplaysSave();
+}
+function blockDisplayUnRotate() {
+    if (blockDisplayIndex == -1)
+        return;
+    var display = blockDisplays[blockDisplayIndex];
+    if (display == null)
+        return;
+    display.transformation.left_rotation = QuatIdentity;
+    display.animate(20);
+    blockDisplaysSave();
+}
+function blockDisplaysNext() {
+    if (blockDisplayIndex == -1)
+        return;
+    var display = blockDisplays[blockDisplayIndex];
+    if (display == null)
+        return;
+    //unglow previous
+    display.glowing = false;
+    display.update();
+    //set selected
+    blockDisplayIndex++;
+    blockDisplayIndex %= blockDisplays.length;
+    display = blockDisplays[blockDisplayIndex];
+    display.glowing = true;
+    display.update();
+    blockDisplaysSave();
+}
+function blockDisplayMove(relPos) {
+    return __awaiter(this, void 0, void 0, function () {
+        var display, _a;
+        return __generator(this, function (_b) {
+            switch (_b.label) {
+                case 0:
+                    if (blockDisplayIndex == -1)
+                        return [2 /*return*/];
+                    display = blockDisplays[blockDisplayIndex];
+                    if (display == null)
+                        return [2 /*return*/];
+                    _a = display;
+                    return [4 /*yield*/, relativePos(relPos, display.Pos)];
+                case 1:
+                    _a.Pos = _b.sent();
+                    display.update().then(function (out) { });
+                    blockDisplaysSave();
+                    return [2 /*return*/];
+            }
+        });
+    });
+}
+function blockDisplayTp(relPos, name) {
+    return __awaiter(this, void 0, void 0, function () {
+        var display, playerPos, _a;
+        return __generator(this, function (_b) {
+            switch (_b.label) {
+                case 0:
+                    if (blockDisplayIndex == -1)
+                        return [2 /*return*/];
+                    display = blockDisplays[blockDisplayIndex];
+                    if (display == null)
+                        return [2 /*return*/];
+                    return [4 /*yield*/, mine.playerData[name].updatePos()];
+                case 1:
+                    playerPos = (_b.sent());
+                    _a = display;
+                    return [4 /*yield*/, relativePos(relPos, playerPos)];
+                case 2:
+                    _a.Pos = _b.sent();
+                    display.update().then(function (out) { });
+                    blockDisplaysSave();
+                    return [2 /*return*/];
+            }
+        });
+    });
+}
+//#endregion blockDisplays
+mine.Emitter.on("serverStart", function (e) {
+    blockDisplaysRead();
+    Door.read();
 });
 mine.Emitter.on("playerChat", function (e) { return __awaiter(void 0, void 0, void 0, function () {
-    var finalPos, display, display, pos, playerPos, finalPos, display, display, display, display, pos, _a, pos, playerPos, finalPos;
-    return __generator(this, function (_b) {
-        switch (_b.label) {
+    var finalPos, pos, playerPos, finalPos, playerPos, relPos, relPos;
+    return __generator(this, function (_a) {
+        switch (_a.label) {
             case 0:
-                if (!(e.chat == "summon")) return [3 /*break*/, 2];
+                if (!e.chat.startsWith("summon")) return [3 /*break*/, 9];
+                if (!e.chat.startsWith("summon display")) return [3 /*break*/, 6];
+                if (!e.chat.startsWith("summon display block")) return [3 /*break*/, 5];
+                if (!(e.chat == "summon display block")) return [3 /*break*/, 2];
                 e.preventDefault();
                 return [4 /*yield*/, mine.playerData[e.name].updatePos()];
             case 1:
-                finalPos = (_b.sent());
-                if (displays.length != 0 && displayIndex != -1) {
-                    display = displays[displayIndex];
-                    display.glowing = false;
-                    display.update();
-                }
-                displays.push(mine.summonBlockDisplay(finalPos, null, null, "minecraft:diamond_block", null, EmptyTransformationObj, true));
-                display = displays[displays.length - 1];
-                display.addTags("Tests").build();
-                displayIndex = displays.length - 1;
-                saveDisplays();
+                finalPos = (_a.sent());
+                blockDisplaySummon(finalPos);
                 return [2 /*return*/];
             case 2:
-                if (!e.chat.match(/^summon (((-|\+)?\d+(\.\d+)?)|~|(~((-|\+)?\d+(\.\d+)?))) (((-|\+)?\d+(\.\d+)?)|~|(~((-|\+)?\d+(\.\d+)?))) (((-|\+)?\d+(\.\d+)?)|~|(~((-|\+)?\d+(\.\d+)?)))$/g)) return [3 /*break*/, 5];
+                if (!e.chat.match(/^summon display block (((-|\+)?\d+(\.\d+)?)|~|(~((-|\+)?\d+(\.\d+)?))) (((-|\+)?\d+(\.\d+)?)|~|(~((-|\+)?\d+(\.\d+)?))) (((-|\+)?\d+(\.\d+)?)|~|(~((-|\+)?\d+(\.\d+)?)))$/g)) return [3 /*break*/, 5];
                 e.preventDefault();
                 pos = e.chat.replace("summon ", "").split(" ");
                 return [4 /*yield*/, mine.playerData[e.name].updatePos()];
             case 3:
-                playerPos = (_b.sent());
+                playerPos = (_a.sent());
                 return [4 /*yield*/, relativePos(pos, playerPos)];
             case 4:
-                finalPos = _b.sent();
-                if (displays.length != 0) {
-                    display = displays[displayIndex];
-                    display.glowing = false;
-                    display.update();
-                }
-                displays.push(mine.summonBlockDisplay(finalPos, null, null, "minecraft:diamond_block", null, EmptyTransformationObj, true));
-                display = displays[displays.length - 1];
-                display.addTags("Tests").build();
-                displayIndex = displays.length - 1;
-                saveDisplays();
+                finalPos = _a.sent();
+                blockDisplaySummon(finalPos);
                 return [2 /*return*/];
-            case 5:
-                if (!(e.chat == "kill-all")) return [3 /*break*/, 6];
-                e.preventDefault();
-                mine.cmd("kill @e[nbt={Tags:[\"FromServer\",\"Displays\",\"Tests\"]}]").then(function (out) { });
-                displays = [];
-                displayIndex = -1;
-                saveDisplays();
-                return [2 /*return*/];
+            case 5: return [3 /*break*/, 8];
             case 6:
-                if (!(e.chat == "kill" || e.chat == "rotate" || e.chat == "un-rotate" || e.chat == "next" || e.chat.startsWith("move ") || e.chat.startsWith("tp "))) return [3 /*break*/, 15];
-                if (displayIndex == -1)
-                    return [2 /*return*/];
-                display = displays[displayIndex];
-                if (display == null)
-                    return [2 /*return*/];
-                e.preventDefault();
-                if (!(e.chat == "kill")) return [3 /*break*/, 7];
-                display.kill();
-                delete displays[displayIndex];
-                displays = displays.filter(function (el) { return el != null; });
-                if (displays.length > 0) {
-                    display = displays[displays.length - 1];
-                    display.glowing = true;
-                    display.update();
-                    displayIndex = displays.length - 1;
-                }
-                else
-                    displayIndex = -1;
-                saveDisplays();
-                return [2 /*return*/];
-            case 7:
-                if (!(e.chat == "rotate")) return [3 /*break*/, 8];
-                display.transformation.left_rotation = [0, 0.383, 0, 0.924];
-                display.animate(20);
-                saveDisplays();
-                return [2 /*return*/];
-            case 8:
-                if (!(e.chat == "un-rotate")) return [3 /*break*/, 9];
-                display.transformation.left_rotation = [0, 0, 0, 1];
-                display.animate(20);
-                saveDisplays();
-                return [2 /*return*/];
-            case 9:
-                if (!(e.chat == "next")) return [3 /*break*/, 10];
-                display = displays[displayIndex];
-                display.glowing = false;
-                display.update();
-                //set selected
-                displayIndex++;
-                displayIndex %= displays.length;
-                display = displays[displayIndex];
-                display.glowing = true;
-                display.update();
-                saveDisplays();
-                return [2 /*return*/];
-            case 10:
-                if (!e.chat.match(/^move (((-|\+)?\d+(\.\d+)?)|~|(~((-|\+)?\d+(\.\d+)?))) (((-|\+)?\d+(\.\d+)?)|~|(~((-|\+)?\d+(\.\d+)?))) (((-|\+)?\d+(\.\d+)?)|~|(~((-|\+)?\d+(\.\d+)?)))$/g)) return [3 /*break*/, 12];
-                pos = e.chat.replace("move ", "").split(" ");
-                _a = display;
-                return [4 /*yield*/, relativePos(pos, display.Pos)];
-            case 11:
-                _a.Pos = _b.sent();
-                display.update().then(function (out) { });
-                saveDisplays();
-                return [2 /*return*/];
-            case 12:
-                if (!e.chat.match(/^tp (((-|\+)?\d+(\.\d+)?)|~|(~((-|\+)?\d+(\.\d+)?))) (((-|\+)?\d+(\.\d+)?)|~|(~((-|\+)?\d+(\.\d+)?))) (((-|\+)?\d+(\.\d+)?)|~|(~((-|\+)?\d+(\.\d+)?)))$/g)) return [3 /*break*/, 15];
-                pos = e.chat.replace("tp ", "").split(" ");
+                if (!e.chat.startsWith("summon door")) return [3 /*break*/, 8];
                 return [4 /*yield*/, mine.playerData[e.name].updatePos()];
-            case 13:
-                playerPos = (_b.sent());
-                return [4 /*yield*/, relativePos(pos, playerPos)];
-            case 14:
-                finalPos = _b.sent();
-                display.Pos = finalPos;
-                display.update().then(function (out) { });
-                saveDisplays();
-                return [2 /*return*/];
-            case 15: return [2 /*return*/];
+            case 7:
+                playerPos = (_a.sent());
+                Door.summon(playerPos);
+                _a.label = 8;
+            case 8: return [3 /*break*/, 10];
+            case 9:
+                if (e.chat.startsWith("door")) {
+                    if (e.chat.startsWith("door open")) {
+                        e.preventDefault();
+                        Door.open();
+                    }
+                    else if (e.chat.startsWith("door close")) {
+                        e.preventDefault();
+                        Door.close();
+                    }
+                    else if (e.chat.startsWith("door toggle")) {
+                        e.preventDefault();
+                        Door.toggle();
+                    }
+                    else if (e.chat.startsWith("door kill")) {
+                        e.preventDefault();
+                        Door.kill();
+                    }
+                }
+                else if (e.chat.startsWith("display")) {
+                    if (e.chat.startsWith("display block")) {
+                        if (e.chat.startsWith("display block kill")) {
+                            if (e.chat == "display block kill all") {
+                                blockDisplaysKillAll();
+                            }
+                            else if (e.chat == "display block kill") {
+                                blockDisplayKill();
+                            }
+                        }
+                        else if (e.chat == "display block next") {
+                            blockDisplaysNext();
+                        }
+                        else if (e.chat == "display block rotate") {
+                            blockDisplayRotate();
+                        }
+                        else if (e.chat == "display block un-rotate") {
+                            blockDisplayUnRotate();
+                        }
+                        else if (e.chat.match(/^display block move (((-|\+)?\d+(\.\d+)?)|~|(~((-|\+)?\d+(\.\d+)?))) (((-|\+)?\d+(\.\d+)?)|~|(~((-|\+)?\d+(\.\d+)?))) (((-|\+)?\d+(\.\d+)?)|~|(~((-|\+)?\d+(\.\d+)?)))$/g)) {
+                            relPos = e.chat.replace("display block move ", "").split(" ");
+                            blockDisplayMove(relPos);
+                        }
+                        else if (e.chat.match(/^display block tp (((-|\+)?\d+(\.\d+)?)|~|(~((-|\+)?\d+(\.\d+)?))) (((-|\+)?\d+(\.\d+)?)|~|(~((-|\+)?\d+(\.\d+)?))) (((-|\+)?\d+(\.\d+)?)|~|(~((-|\+)?\d+(\.\d+)?)))$/g)) {
+                            relPos = e.chat.replace("display block tp ", "").split(" ");
+                            blockDisplayTp(relPos, e.name);
+                        }
+                    }
+                }
+                _a.label = 10;
+            case 10: return [2 /*return*/];
         }
     });
 }); });
-//#endregion

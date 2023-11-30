@@ -804,7 +804,8 @@ async function relativePos(pos:Vec3<string>|null,relativePos:Vec3<number>):Promi
     });
 }
 
-type doorType = [BlockDisplay,BlockDisplay,
+type doorType = [
+    BlockDisplay,BlockDisplay,
     BlockDisplay,BlockDisplay,
     Interaction,Interaction,
     Interaction,Interaction,
